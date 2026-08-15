@@ -282,6 +282,14 @@ and container names. IDs are for references; slugs are for humans and Docker.
 - One `IEntityTypeConfiguration<T>` per entity, in `Airside.Data/Configurations/`.
   No mapping attributes on entities; `Core` must not reference EF Core.
 - Migrations are checked in and never edited after merge.
+- **Expand, then contract. Additive changes only within a release.** A migration
+  that drops or renames a column makes rollback impossible without restoring the
+  pre-update dump — because the updater puts the previous image back against the
+  new schema, and old code meets a column that is gone. Losing every write since
+  the update began is not an acceptable rollback. Destructive changes split
+  across two releases: N+1 stops using the column, N+2 drops it. Where this
+  genuinely cannot be done, the migration is flagged so the updater knows a
+  database restore is required rather than an image swap.
 - **No `decimal` in any entity.** SQLite stores `decimal` as TEXT and cannot
   compare or aggregate it server-side, so a `WHERE allocated > x` misbehaves
   silently on one provider and not the other. Memory and storage are `long`
