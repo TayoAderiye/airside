@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using Airside.Api.Contracts;
 using Airside.Api.Features;
+using Airside.Api.Features.Databases;
 using Airside.Api.Hosting;
 using Airside.Api.Hubs;
 using Airside.Api.Infrastructure;
@@ -14,6 +15,7 @@ using Airside.Data.Migrations.Postgres;
 using Airside.Data.Migrations.Sqlite;
 using Airside.Data.Seeding;
 using Airside.Runtime;
+using Airside.Runtime.Jobs;
 using Airside.Runtime.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -130,6 +132,9 @@ builder.Services.AddScoped<IJobHandlerRegistry, JobHandlerRegistry>();
 builder.Services.AddHostedService<JobDispatcherService>();
 
 builder.Services.AddScoped<IHostAllocationReader, HostAllocationReader>();
+builder.Services.AddSingleton<AllocationGate>();
+builder.Services.AddScoped<DatabaseService>();
+builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
 builder.Services.AddHostedService<HostDiscoveryService>();
 
 builder.Services.AddSignalR();
@@ -201,6 +206,7 @@ app.MapJobEndpoints();
 app.MapAuditEndpoints();
 app.MapAccessEndpoints();
 app.MapSystemEndpoints();
+app.MapDatabaseEndpoints();
 
 app.MapHub<JobsHub>("/hubs/jobs");
 app.MapHub<LogsHub>("/hubs/logs");

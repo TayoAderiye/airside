@@ -17,10 +17,6 @@ public interface IHostAllocationReader
 /// drifts from reality the first time a workload row changes outside the path
 /// that maintains it, and the admission gate is the worst possible place for
 /// drift — the failure mode is admitting a workload the host cannot run.
-/// <para>
-/// Phase 1 has no workload table yet, so the sum is over zero rows. It becomes a
-/// real sum in Phase 2 without the shape of this changing.
-/// </para>
 /// </remarks>
 public sealed class HostAllocationReader(
     AirsideDbContext db,
@@ -41,7 +37,30 @@ public sealed class HostAllocationReader(
             host.ReserveMemoryBytes,
             host.ReserveStorageBytes);
 
-        var allocated = ResourceTriple.Zero;
+        // Derived on every call, never stored. A cached counter drifts the first
+        // time a workload row changes outside the path that maintains it, and the
+        // admission gate is the worst possible place for drift.
+        //
+        // Orphaned volumes are counted deliberately: their disk is still occupied,
+        // and leaving them out would let a few delete-and-recreate cycles quietly
+        // consume the host with nothing in the UI explaining where it went.
+        var workloads = await db.Workloads
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Cpu = g.Sum(w => w.CpuLimitNanos),
+                Memory = g.Sum(w => w.MemoryLimitBytes),
+            })
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        var storage = await db.Volumes
+            .AsNoTracking()
+            .SumAsync(v => v.SizeAllocationBytes, ct)
+            .ConfigureAwait(false);
+
+        var allocated = new ResourceTriple(workloads?.Cpu ?? 0, workloads?.Memory ?? 0, storage);
 
         ResourceTriple? used = null;
 

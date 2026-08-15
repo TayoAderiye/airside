@@ -66,4 +66,12 @@ public sealed record DatabaseEngineCapabilities
     /// attached databases cannot fight over <c>DATABASE_URL</c>.
     /// </summary>
     public required string DefaultEnvKeyPrefix { get; init; }
+
+    /// <summary>
+    /// Allowed values for an engine that has an eviction policy, null for one
+    /// that does not. Exposed through the capability rather than fetched from a
+    /// concrete engine type, so the provisioning form stays driven entirely by
+    /// what an engine says about itself.
+    /// </summary>
+    public IReadOnlyList<string>? EvictionPolicies { get; init; }
 }

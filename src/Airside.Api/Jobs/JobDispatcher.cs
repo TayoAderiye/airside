@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using Airside.Core.Common;
+using Airside.Core.Containers;
 using Airside.Core.Jobs;
 using Airside.Data;
 using Airside.Data.Entities;
@@ -181,7 +182,18 @@ public sealed class JobDispatcherService(
             job.ErrorCode = result.Failure!.Code;
             job.ErrorMessage = result.Failure.Message;
         }
-#pragma warning disable CA1031 // A handler may throw anything; the dispatcher must survive it and compensate.
+        catch (ContainerRuntimeException ex)
+        {
+            // The commonest real failure: the Docker daemon is down, restarting,
+            // or unreachable. It deserves a code the UI can act on and a message
+            // that names the cause, not a generic "something went wrong" that
+            // sends the operator to the logs to find out Docker was stopped.
+            logger.LogError(ex, "Job {JobId} ({JobType}) could not reach the container runtime", job.Id, job.Type);
+            job.ErrorCode = ErrorCodes.RuntimeUnavailable;
+            job.ErrorMessage = "The container runtime is unreachable. Check that Docker is running.";
+            job.ErrorDetail = ex.ToString();
+        }
+#pragma warning disable CA1031 // A handler may throw anything else; the dispatcher must survive it and compensate.
         catch (Exception ex)
         {
             logger.LogError(ex, "Job {JobId} ({JobType}) threw", job.Id, job.Type);

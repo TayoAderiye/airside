@@ -18,7 +18,7 @@ passing.
 
 ---
 
-## Phase 1 — Auth, RBAC, host, runtime, jobs, audit
+## Phase 1 — Auth, RBAC, host, runtime, jobs, audit ✅ *complete (commit `25db138`)*
 
 The largest phase, because almost everything downstream depends on it. It ends
 with **a working `curl | sh` install**, not with a library — the install path is
@@ -70,7 +70,7 @@ dashboard, a first-run setup token on the console, and a created Super Admin.
 
 ---
 
-## Phase 2 — Database provisioning
+## Phase 2 — Database provisioning ✅ *complete*
 
 **`Airside.Core`** — `DatabaseProvisionSpec` validators.
 

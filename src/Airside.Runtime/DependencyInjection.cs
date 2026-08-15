@@ -1,4 +1,9 @@
 using Airside.Core.Containers;
+using Airside.Core.Databases;
+using Airside.Core.Jobs;
+using Airside.Core.Workloads;
+using Airside.Runtime.Databases;
+using Airside.Runtime.Jobs;
 using Airside.Core.Hosting;
 using Airside.Core.Security;
 using Airside.Runtime.Docker;
@@ -49,6 +54,37 @@ public static class DependencyInjection
         services.AddSingleton<IAllocationPolicy, StrictNoOvercommitPolicy>();
         services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
         services.AddSingleton<ISecretGenerator, SecretGenerator>();
+
+        // Engines are registered explicitly, not scanned. A contributor adding a
+        // fifth engine should have to say so here, because the registration is
+        // also where its capabilities become visible to the whole system.
+        services.AddSingleton<IDatabaseEngine, PostgresEngine>();
+        services.AddSingleton<IDatabaseEngine, MySqlEngine>();
+        services.AddSingleton<IDatabaseEngine, MongoDbEngine>();
+        services.AddSingleton<IDatabaseEngine, RedisEngine>();
+        services.AddSingleton<IDatabaseEngineRegistry, DatabaseEngineRegistry>();
+
+        services.AddScoped<IJobHandler, DatabaseProvisionHandler>();
+        services.AddScoped<IJobHandler, DatabaseResizeHandler>();
+        services.AddScoped<IJobHandler, DatabaseDeleteHandler>();
+
+        // One class, three job types. The only difference is which container call
+        // it makes and what state it lands in.
+        services.AddScoped<IJobHandler>(sp => new DatabaseLifecycleHandler(
+            sp.GetRequiredService<IContainerRuntime>(),
+            sp.GetRequiredService<IDatabaseWorkloadStore>(),
+            DatabaseJobTypes.Start,
+            DatabaseState.Running));
+        services.AddScoped<IJobHandler>(sp => new DatabaseLifecycleHandler(
+            sp.GetRequiredService<IContainerRuntime>(),
+            sp.GetRequiredService<IDatabaseWorkloadStore>(),
+            DatabaseJobTypes.Stop,
+            DatabaseState.Stopped));
+        services.AddScoped<IJobHandler>(sp => new DatabaseLifecycleHandler(
+            sp.GetRequiredService<IContainerRuntime>(),
+            sp.GetRequiredService<IDatabaseWorkloadStore>(),
+            DatabaseJobTypes.Restart,
+            DatabaseState.Running));
 
         return services;
     }
