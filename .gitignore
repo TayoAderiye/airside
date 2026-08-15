@@ -1,0 +1,43 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+publish/
+*.user
+*.suo
+
+# NativeAOT / single-file publish output
+*.dbg
+*.dwarf
+
+# Test output
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+*.trx
+
+# Tooling
+.vs/
+.vscode/
+.idea/
+*.DotSettings.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local runtime state — never commit. Airside is a privileged system; a leaked
+# key ring or state file is a full compromise of every managed secret.
+*.env
+.env.*
+appsettings.Local.json
+appsettings.*.Local.json
+/local/
+/data/
+airside.db
+airside.db-shm
+airside.db-wal
+keys/
+state.json
