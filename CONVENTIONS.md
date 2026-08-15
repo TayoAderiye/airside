@@ -276,9 +276,19 @@ and container names. IDs are for references; slugs are for humans and Docker.
 
 ### Rules
 
-- `DateTimeOffset`, always UTC, always via an injected `TimeProvider`.
-  `DateTime.Now` and `DateTime.UtcNow` are banned — they make time untestable and
-  the job/backup/certificate-expiry code is full of time.
+- **Persisted timestamps are `DateTime` in UTC**, obtained as
+  `timeProvider.GetUtcNow().UtcDateTime`. `DateTime.Now` and `DateTime.UtcNow`
+  are banned — they make time untestable, and the job, backup, and
+  certificate-expiry code is full of time.
+
+  > This was originally specified as `DateTimeOffset`, and that is wrong here:
+  > **SQLite cannot `ORDER BY` a `DateTimeOffset` at all** — EF Core throws
+  > `NotSupportedException` rather than degrading — so the job dispatcher and
+  > every audit query would fail on one supported provider while working
+  > perfectly on the other. Since Airside stores nothing but UTC, the offset
+  > carried no information anyway. A global value converter re-stamps `Kind` as
+  > UTC on read, because SQLite returns `Unspecified` and a serialised timestamp
+  > without a `Z` is a contract violation. DTOs still expose `DateTimeOffset`.
 - One `IEntityTypeConfiguration<T>` per entity, in `Airside.Data/Configurations/`.
   No mapping attributes on entities; `Core` must not reference EF Core.
 - Migrations are checked in and never edited after merge.

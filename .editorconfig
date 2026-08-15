@@ -38,7 +38,10 @@ dotnet_diagnostic.CA1716.severity = none
 # Queue. IJobQueue is a job queue in the ordinary sense of the word and the name
 # is used throughout ARCHITECTURE.md. Allowed as a suffix rather than disabling
 # the rule, so the other reserved suffixes stay enforced.
-dotnet_code_quality.CA1711.allowed_suffixes = Queue
+# "Permission" is likewise reserved for the long-dead Code Access Security types
+# (IPermission / CodeAccessPermission). Airside's Permission entity is a
+# permission in the ordinary sense.
+dotnet_code_quality.CA1711.allowed_suffixes = Queue|Permission
 
 # CA1848: use LoggerMessage delegates instead of ILogger extension methods.
 # Correct for hot paths; Airside's logging is control-plane operations at human
@@ -52,3 +55,8 @@ dotnet_diagnostic.CA1848.severity = none
 # are what make a failing test name readable in CI output. Scoped to tests only;
 # production code still obeys the rule.
 dotnet_diagnostic.CA1707.severity = none
+
+[src/**/Migrations/*.cs]
+# EF Core writes these. They are generated code and are never hand-edited except
+# for the deliberate raw-SQL guards, so analyzer style rules do not apply.
+generated_code = true

@@ -5,9 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
@@ -19,6 +21,7 @@
     <ProjectReference Include="..\..\src\Airside.Core\Airside.Core.csproj" />
     <ProjectReference Include="..\..\src\Airside.Data\Airside.Data.csproj" />
     <ProjectReference Include="..\..\src\Airside.Runtime\Airside.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Airside.Data.Migrations.Sqlite\Airside.Data.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\Airside.Api\Airside.Api.csproj" />
   </ItemGroup>
 

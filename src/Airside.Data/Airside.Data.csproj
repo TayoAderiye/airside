@@ -1,10 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The model lives here; the migrations do not. EF Core emits provider-specific
+    DDL and allows exactly one DbContextModelSnapshot per assembly, so Postgres
+    and SQLite migrations cannot share a project. See ARCHITECTURE.md §1.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Airside.Core\Airside.Core.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-  </PropertyGroup>
 
 </Project>

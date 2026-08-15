@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Format
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Unit tests
+        run: dotnet test --no-build -c Release --filter "Category!=Integration"
+
+      - name: Integration tests
+        # The runner has a Docker daemon; these exercise the real runtime.
+        run: dotnet test --no-build -c Release --filter "Category=Integration"
+
+  migrations:
+    # Airside supports two providers and EF Core emits provider-specific DDL. A
+    # migration that lands for Postgres and not SQLite breaks the SQLite install,
+    # and nothing else in CI would catch it — so both are checked, every time.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Postgres model is up to date
+        run: |
+          dotnet ef migrations has-pending-model-changes \
+            --project src/Airside.Data.Migrations.Postgres \
+            --startup-project src/Airside.Data.Migrations.Postgres \
+            --context AirsideDbContext
+
+      - name: SQLite model is up to date
+        run: |
+          dotnet ef migrations has-pending-model-changes \
+            --project src/Airside.Data.Migrations.Sqlite \
+            --startup-project src/Airside.Data.Migrations.Sqlite \
+            --context AirsideDbContext
+
+  boundaries:
+    # The architectural rules from CONVENTIONS.md §1, enforced rather than
+    # trusted to review. Airside.Core has its own MSBuild guard; these cover the
+    # rules that span projects.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Only Airside.Runtime may reference Docker.DotNet
+        run: |
+          offenders=$(grep -rl 'Include="Docker.DotNet"' --include='*.csproj' src \
+            | grep -v 'src/Airside.Runtime/' || true)
+          if [ -n "$offenders" ]; then
+            echo "Docker.DotNet is referenced outside Airside.Runtime:"; echo "$offenders"; exit 1
+          fi
+
+      - name: Airside.Cli has no project references
+        run: |
+          if grep -q '<ProjectReference' src/Airside.Cli/Airside.Cli.csproj; then
+            echo "Airside.Cli must stay dependency-free so it works when the API does not."; exit 1
+          fi
+
+      - name: No shell invocation in the runtime layer
+        run: |
+          # "Never build shell commands from user input" is held by there being no
+          # shell at all. If one appears, it is a security review, not a refactor.
+          if grep -rnE '"(/bin/)?(ba)?sh"|"-c"|CMD-SHELL' --include='*.cs' src/; then
+            echo "A shell invocation appeared in C#. See CONVENTIONS.md §9."; exit 1
+          fi

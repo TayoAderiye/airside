@@ -1,5 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <UserSecretsId>airside-api</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Airside.Core\Airside.Core.csproj" />
     <ProjectReference Include="..\Airside.Data\Airside.Data.csproj" />
@@ -7,8 +18,5 @@
     <ProjectReference Include="..\Airside.Data.Migrations.Sqlite\Airside.Data.Migrations.Sqlite.csproj" />
     <ProjectReference Include="..\Airside.Runtime\Airside.Runtime.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-  </PropertyGroup>
 
 </Project>

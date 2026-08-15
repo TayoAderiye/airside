@@ -1,10 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The only assembly permitted to reference Docker.DotNet or to open a socket to
+    Caddy or a database engine. Concentrating that here makes the security review
+    of "never build shell strings from user input" a review of one project rather
+    than of the whole tree. See CONVENTIONS.md §9.
+  -->
+
+  <ItemGroup>
+    <PackageReference Include="Docker.DotNet" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Airside.Core\Airside.Core.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-  </PropertyGroup>
 
 </Project>

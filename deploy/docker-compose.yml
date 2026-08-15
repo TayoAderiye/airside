@@ -1,0 +1,124 @@
+# Airside control plane.
+#
+# Written by the installer into /opt/airside/docker-compose.yml. The three
+# services here are the system containers: they carry airside.system=true, are
+# visible in the UI, and are structurally undeletable through the platform.
+
+name: airside
+
+services:
+  airside-db:
+    # Pinned to a major version on purpose. The routine update path must never
+    # change this — a major Postgres upgrade needs pg_upgrade or dump-and-restore
+    # and is a separate, explicitly triggered operation.
+    image: postgres:16.6-alpine
+    container_name: airside-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airside
+      POSTGRES_USER: airside
+      POSTGRES_PASSWORD: ${AIRSIDE_DB_PASSWORD:?installer must generate this}
+    volumes:
+      - airside-db-data:/var/lib/postgresql/data
+    networks:
+      - airside-internal
+    # Never published to the host. The control-plane store is reachable only from
+    # the API over the internal network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airside -d airside"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    labels:
+      airside.managed: "true"
+      airside.system: "true"
+      airside.kind: "system"
+
+  airside-api:
+    image: ghcr.io/tayo/airside:${AIRSIDE_VERSION:?installer must pin an explicit tag}
+    container_name: airside-api
+    restart: unless-stopped
+    depends_on:
+      airside-db:
+        condition: service_healthy
+    environment:
+      Airside__Store__Provider: ${AIRSIDE_STORE_PROVIDER:-Postgres}
+      Airside__Store__ConnectionString: ${AIRSIDE_STORE_CONNECTION}
+      Airside__Store__KeyRingPath: /var/lib/airside/keys
+    volumes:
+      # Root-equivalent reach over the host. This is unavoidable for a control
+      # plane that manages containers; SECURITY.md says so plainly rather than
+      # implying otherwise.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # The key ring MUST outlive the container. If it is lost, every stored
+      # secret becomes undecryptable — which would happen on the first
+      # self-update if it lived inside the image.
+      - /var/lib/airside/keys:/var/lib/airside/keys
+      - /var/lib/airside/data:/var/lib/airside/data
+      - /var/lib/airside/volumes:/var/lib/airside/volumes
+      - /var/lib/airside/backups:/var/lib/airside/backups
+
+      # The API runs in a container, so its own /proc describes the container,
+      # not the machine. Without these, host capacity reads as the API's own
+      # memory limit and the allocation gate admits against the wrong number.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    # Joins the host's docker group rather than running as root. Still
+    # root-equivalent in effect — the socket is the privilege, not the uid — but
+    # it avoids a root process for everything else the container does.
+    group_add:
+      - ${AIRSIDE_DOCKER_GID:-999}
+    networks:
+      - airside-internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    labels:
+      airside.managed: "true"
+      airside.system: "true"
+      airside.kind: "system"
+
+  airside-proxy:
+    image: caddy:2.8-alpine
+    container_name: airside-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - airside-caddy-data:/data
+      - airside-caddy-config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - airside-internal
+    # Port 2019 (the admin API) is deliberately NOT published. It is
+    # unauthenticated and can load configuration that executes commands, so
+    # exposing it to the host is equivalent to handing over the machine. Only
+    # airside-api shares airside-internal with it.
+    labels:
+      airside.managed: "true"
+      airside.system: "true"
+      airside.kind: "system"
+
+networks:
+  airside-internal:
+    name: airside-internal
+    labels:
+      airside.managed: "true"
+      airside.system: "true"
+
+volumes:
+  airside-db-data:
+    name: airside-db-data
+    labels:
+      airside.managed: "true"
+      airside.system: "true"
+  airside-caddy-data:
+    name: airside-caddy-data
+  airside-caddy-config:
+    name: airside-caddy-config
