@@ -1,0 +1,23 @@
+<Project>
+
+  <!--
+    Central package management. Package versions live here and nowhere else;
+    individual .csproj files carry <PackageReference Include="..." /> with no
+    Version attribute. See CONVENTIONS.md §1.
+
+    Packages are added as the phase that needs them lands, not up front.
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+</Project>

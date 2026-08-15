@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Airside.Core has no infrastructure dependencies. It is the seam that keeps
+    Docker an implementation detail: if Docker.DotNet, EF Core, or ASP.NET types
+    reach this assembly, the remote-agent and Podman stories are dead and unit
+    tests need a live daemon.
+
+    The rule is enforced below rather than left to review memory.
+  -->
+
+  <Target Name="AirsideCoreDependencyGuard" BeforeTargets="Build">
+    <ItemGroup>
+      <ForbiddenPackage Include="@(PackageReference)"
+                        Condition="$([System.String]::Copy('%(Identity)').StartsWith('Docker.DotNet'))
+                                OR $([System.String]::Copy('%(Identity)').StartsWith('Microsoft.EntityFrameworkCore'))
+                                OR $([System.String]::Copy('%(Identity)').StartsWith('Microsoft.AspNetCore'))
+                                OR $([System.String]::Copy('%(Identity)').StartsWith('Npgsql'))
+                                OR $([System.String]::Copy('%(Identity)').StartsWith('StackExchange.Redis'))" />
+    </ItemGroup>
+    <Error Condition="'@(ForbiddenPackage)' != ''"
+           Text="Airside.Core must not reference infrastructure packages, but found: @(ForbiddenPackage). See CONVENTIONS.md §1." />
+    <Error Condition="'@(ProjectReference)' != ''"
+           Text="Airside.Core must not reference any other project, but found: @(ProjectReference). See CONVENTIONS.md §1." />
+  </Target>
+
+</Project>

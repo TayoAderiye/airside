@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The `airside` host binary. Published NativeAOT and self-contained so the
+    installer drops one file with no .NET runtime on the host.
+
+    This project has no ProjectReference, deliberately. Its whole purpose is to
+    work on the day the API is broken — if it called the API, it would be useless
+    exactly when it is needed. It talks to the Docker socket and reads
+    /var/lib/airside/state.json instead. See ARCHITECTURE.md §1.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>airside</AssemblyName>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Shared as linked source, not as a project reference: the label vocabulary
+      and host paths must be byte-identical to the API's, but a reference to
+      Airside.Core would drag AOT-hostile dependencies into a binary that has to
+      stay small and trim-clean. One definition, compiled twice.
+    -->
+    <Compile Include="../Airside.Core/Naming/AirsideLabels.cs" Link="Shared/AirsideLabels.cs" />
+  </ItemGroup>
+
+</Project>

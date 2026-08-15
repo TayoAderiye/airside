@@ -1,0 +1,54 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,md,props,targets,csproj,config}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+# File-scoped namespaces, expression bodies, and var usage — one style, held to.
+csharp_style_namespace_declarations = file_scoped:error
+csharp_using_directive_placement = outside_namespace:error
+dotnet_sort_system_directives_first = true
+csharp_prefer_braces = true:error
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:error
+csharp_style_var_when_type_is_apparent = true:suggestion
+dotnet_style_prefer_collection_expression = true:suggestion
+
+# Analyzer rules deliberately turned off, with reasons. Anything not listed here
+# is on, and a warning is a build error (Directory.Build.props).
+
+# CA1716: type and parameter names should not match a reserved keyword in any
+# .NET language. The concern is VB and F# consumers of a published library.
+# Airside is an application, not a package; nothing consumes these assemblies
+# from another language. `Error` is the correct name for the domain type and
+# renaming it to appease a VB compiler nobody will run makes the code worse.
+dotnet_diagnostic.CA1716.severity = none
+
+# CA1711 reserves the "Queue" suffix for types deriving from System.Collections
+# Queue. IJobQueue is a job queue in the ordinary sense of the word and the name
+# is used throughout ARCHITECTURE.md. Allowed as a suffix rather than disabling
+# the rule, so the other reserved suffixes stay enforced.
+dotnet_code_quality.CA1711.allowed_suffixes = Queue
+
+# CA1848: use LoggerMessage delegates instead of ILogger extension methods.
+# Correct for hot paths; Airside's logging is control-plane operations at human
+# frequency, and the source-generated form is markedly less readable. Revisit if
+# a profiler ever says otherwise.
+dotnet_diagnostic.CA1848.severity = none
+
+[tests/**/*.cs]
+# CA1707 forbids underscores in member names. Test methods follow
+# MethodName_Scenario_ExpectedOutcome (CONVENTIONS.md §10), where the underscores
+# are what make a failing test name readable in CI output. Scoped to tests only;
+# production code still obeys the rule.
+dotnet_diagnostic.CA1707.severity = none

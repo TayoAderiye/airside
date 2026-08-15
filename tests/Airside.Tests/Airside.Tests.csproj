@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Airside.Core\Airside.Core.csproj" />
+    <ProjectReference Include="..\..\src\Airside.Data\Airside.Data.csproj" />
+    <ProjectReference Include="..\..\src\Airside.Runtime\Airside.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Airside.Api\Airside.Api.csproj" />
+  </ItemGroup>
+
+</Project>
