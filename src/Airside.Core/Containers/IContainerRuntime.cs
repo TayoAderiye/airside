@@ -78,6 +78,23 @@ public interface IContainerOperations
     /// where the payload is a stream that must not be buffered in memory.
     /// </summary>
     Task<ExecResult> ExecAsync(ExecRequest request, Stream? standardOutput, CancellationToken ct);
+
+    /// <summary>
+    /// Writes a file into a container's own filesystem.
+    /// </summary>
+    /// <remarks>
+    /// Used to stage a dump before a restore. This is the container's filesystem,
+    /// not a volume: the two are different places, and a restore staged into the
+    /// data volume would sit next to the data instead of being fed to the
+    /// restore tool. <paramref name="containerPath"/> is a fixed platform-chosen
+    /// directory, never a caller-supplied path.
+    /// </remarks>
+    Task CopyIntoContainerAsync(
+        string containerId,
+        string containerPath,
+        string fileName,
+        Stream content,
+        CancellationToken ct);
 }
 
 public interface IImageOperations

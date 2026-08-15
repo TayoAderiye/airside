@@ -77,10 +77,16 @@ public sealed record MaxMemoryRecommendation(long Bytes, double FractionOfLimit,
 
 public sealed record DatabaseProbeResult(bool IsReachable, bool IsAcceptingWrites, string? Detail);
 
+/// <param name="EngineSnapshot">
+/// The exact engine version, e.g. <c>postgres:16</c>. Supplied by the caller and
+/// recorded on the backup, because a restore has to refuse a major-version
+/// mismatch before it stops anything.
+/// </param>
 public sealed record BackupOperation(
     DatabaseEndpoint Endpoint,
     DatabaseCredentialValue Credential,
     string DataVolumeName,
+    string EngineSnapshot,
     IProgress<string>? Progress);
 
 public sealed record RestoreOperation(

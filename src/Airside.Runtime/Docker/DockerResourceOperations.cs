@@ -258,27 +258,174 @@ internal sealed class DockerVolumeOperations(DD.IDockerClient client) : IVolumeO
     /// <summary>Pinned by digest so a measurement helper cannot silently change under us.</summary>
     private const string MeasurementImage = "busybox:1.36";
 
+    /// <summary>
+    /// Streams a file out of a volume as a tar archive entry.
+    /// </summary>
+    /// <remarks>
+    /// Docker has no volume-level file API, so a throwaway container mounts the
+    /// volume read-only and the archive is pulled from it. The helper image is
+    /// fixed and its command is a fixed argument vector; the only value derived
+    /// from anything user-supplied is the volume name, which is built from a
+    /// validated slug.
+    /// </remarks>
     public async Task CopyFromAsync(
         string volumeName,
         string pathInVolume,
         Stream destination,
         CancellationToken ct)
     {
-        // Implemented in Phase 3 alongside Redis RDB snapshot backups, which is
-        // the only caller. Declaring it now keeps the interface stable for the
-        // engine work rather than reshaping it mid-phase.
-        await Task.CompletedTask.ConfigureAwait(false);
-        throw new NotSupportedException("Volume file copy arrives with backups in Phase 3.");
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var containerId = await CreateHelperAsync(volumeName, readOnly: true, ct).ConfigureAwait(false);
+
+        try
+        {
+            var response = await client.Containers.GetArchiveFromContainerAsync(
+                containerId,
+                new DM.GetArchiveFromContainerParameters { Path = $"{HelperMount}/{pathInVolume}" },
+                statOnly: false,
+                ct).ConfigureAwait(false);
+
+            using var archive = response.Stream;
+            await ExtractSingleEntryAsync(archive, destination, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await client.Containers
+                .RemoveContainerAsync(containerId, new DM.ContainerRemoveParameters { Force = true }, ct)
+                .ConfigureAwait(false);
+        }
     }
 
+    /// <summary>
+    /// Writes a file into a volume.
+    /// </summary>
+    /// <remarks>
+    /// Only valid when nothing has the volume open for writing. The Redis restore
+    /// flow stops the container first, which is why
+    /// <c>RequiresStopForRestore</c> exists as a capability rather than as a
+    /// comment.
+    /// </remarks>
     public async Task CopyIntoAsync(
         string volumeName,
         string pathInVolume,
         Stream source,
         CancellationToken ct)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        throw new NotSupportedException("Volume file copy arrives with restores in Phase 3.");
+        ArgumentNullException.ThrowIfNull(source);
+
+        var containerId = await CreateHelperAsync(volumeName, readOnly: false, ct).ConfigureAwait(false);
+
+        try
+        {
+            using var archive = new MemoryStream();
+            await WriteSingleEntryTarAsync(archive, pathInVolume, source, ct).ConfigureAwait(false);
+            archive.Position = 0;
+
+            await client.Containers.ExtractArchiveToContainerAsync(
+                containerId,
+                new DM.ContainerPathStatParameters { Path = HelperMount, AllowOverwriteDirWithFile = false },
+                archive,
+                ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await client.Containers
+                .RemoveContainerAsync(containerId, new DM.ContainerRemoveParameters { Force = true }, ct)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private const string HelperMount = "/airside-volume";
+
+    private async Task<string> CreateHelperAsync(string volumeName, bool readOnly, CancellationToken ct)
+    {
+        var created = await client.Containers.CreateContainerAsync(
+            new DM.CreateContainerParameters
+            {
+                Image = MeasurementImage,
+                // Never started. The archive API works against a created
+                // container, so the helper never runs a single instruction — which
+                // is the smallest possible surface for something that mounts a
+                // production data volume.
+                Cmd = ["true"],
+                Labels = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [AirsideLabels.Managed] = AirsideLabels.True,
+                    [AirsideLabels.Kind] = AirsideLabels.KindSystem,
+                },
+                HostConfig = new DM.HostConfig
+                {
+                    Mounts =
+                    [
+                        new DM.Mount
+                        {
+                            Type = "volume",
+                            Source = volumeName,
+                            Target = HelperMount,
+                            ReadOnly = readOnly,
+                        },
+                    ],
+                    ReadonlyRootfs = true,
+                    SecurityOpt = ["no-new-privileges:true"],
+                    CapDrop = ["ALL"],
+                    NetworkMode = "none",
+                },
+            },
+            ct).ConfigureAwait(false);
+
+        return created.ID;
+    }
+
+    /// <summary>
+    /// Reads the first regular file out of a tar stream.
+    /// </summary>
+    /// <remarks>
+    /// The entry length is honoured exactly. Copying the whole stream would append
+    /// tar's trailing padding and end-of-archive blocks to the payload, which for
+    /// an RDB file means a backup that is silently a few hundred bytes longer than
+    /// the data and fails to load.
+    /// </remarks>
+    private static async Task ExtractSingleEntryAsync(Stream archive, Stream destination, CancellationToken ct)
+    {
+        using var reader = new TarReader(archive, leaveOpen: true);
+
+        while (await reader.GetNextEntryAsync(cancellationToken: ct).ConfigureAwait(false) is { } entry)
+        {
+            if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)
+                || entry.DataStream is null)
+            {
+                continue;
+            }
+
+            await entry.DataStream.CopyToAsync(destination, ct).ConfigureAwait(false);
+            await destination.FlushAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        throw new ContainerRuntimeException("The volume contained no such file.");
+    }
+
+    private static async Task WriteSingleEntryTarAsync(
+        Stream archive,
+        string entryName,
+        Stream content,
+        CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        await content.CopyToAsync(buffer, ct).ConfigureAwait(false);
+        buffer.Position = 0;
+
+        await using var writer = new TarWriter(archive, TarEntryFormat.Pax, leaveOpen: true);
+
+        var entry = new PaxTarEntry(TarEntryType.RegularFile, entryName)
+        {
+            DataStream = buffer,
+            Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+                | UnixFileMode.GroupRead | UnixFileMode.OtherRead,
+        };
+
+        await writer.WriteEntryAsync(entry, ct).ConfigureAwait(false);
     }
 }
 

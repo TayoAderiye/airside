@@ -408,4 +408,49 @@ internal sealed class DockerContainerOperations(DD.IDockerClient client, ILogger
             throw new ContainerRuntimeException($"Exec failed in container {request.ContainerId}.", ex);
         }
     }
+
+    public async Task CopyIntoContainerAsync(
+        string containerId,
+        string containerPath,
+        string fileName,
+        Stream content,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        try
+        {
+            using var buffer = new MemoryStream();
+            await content.CopyToAsync(buffer, ct).ConfigureAwait(false);
+            buffer.Position = 0;
+
+            using var archive = new MemoryStream();
+
+            await using (var writer = new System.Formats.Tar.TarWriter(
+                archive, System.Formats.Tar.TarEntryFormat.Pax, leaveOpen: true))
+            {
+                await writer.WriteEntryAsync(
+                    new System.Formats.Tar.PaxTarEntry(
+                        System.Formats.Tar.TarEntryType.RegularFile, fileName)
+                    {
+                        DataStream = buffer,
+                        Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                    },
+                    ct).ConfigureAwait(false);
+            }
+
+            archive.Position = 0;
+
+            await client.Containers.ExtractArchiveToContainerAsync(
+                containerId,
+                new DM.ContainerPathStatParameters { Path = containerPath },
+                archive,
+                ct).ConfigureAwait(false);
+        }
+        catch (DD.DockerApiException ex)
+        {
+            throw new ContainerRuntimeException(
+                $"Could not stage a file into container {containerId}.", ex);
+        }
+    }
 }

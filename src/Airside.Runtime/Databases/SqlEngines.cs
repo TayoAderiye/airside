@@ -259,6 +259,80 @@ internal sealed class PostgresEngine(IContainerRuntime runtime) : DatabaseEngine
             ($"{keyPrefix}_PASSWORD", details.Password.Reveal(), true),
             ($"{keyPrefix}_URL", details.ConnectionString.Reveal(), true));
     }
+
+    public override Task<BackupArtifact> BackupAsync(
+        BackupOperation operation,
+        Stream destination,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        // --clean --if-exists so the dump can be replayed into a database that
+        // already has objects, which is what a restore always faces.
+        return LogicalBackup.RunAsync(
+            Runtime,
+            operation.Endpoint.ContainerId,
+            [
+                "pg_dump", "--username", operation.Credential.Username!, "--dbname",
+                operation.Endpoint.DatabaseName!, "--clean", "--if-exists", "--no-owner", "--no-privileges",
+            ],
+            // PGPASSWORD, not --password: an argument is visible in the
+            // container's process list to anything else running in it.
+            Entries(("PGPASSWORD", operation.Credential.Password.Reveal(), true)),
+            destination,
+            operation.EngineSnapshot,
+            operation.Progress,
+            ct);
+    }
+
+    public override Task RestoreAsync(RestoreOperation operation, Stream source, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return LogicalBackup.RestoreAsync(
+            Runtime,
+            operation.Endpoint.ContainerId,
+            [
+                "psql", "--username", operation.Credential.Username!, "--dbname",
+                operation.Endpoint.DatabaseName!, "--file", $"/tmp/{LogicalBackup.StagingFile}",
+                "--set", "ON_ERROR_STOP=1",
+            ],
+            Entries(("PGPASSWORD", operation.Credential.Password.Reveal(), true)),
+            source,
+            ct);
+    }
+
+    public override async Task RotatePasswordAsync(
+        DatabaseEndpoint endpoint,
+        DatabaseCredentialValue current,
+        Secret replacement,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        // The new password reaches psql through a bound parameter in a DO block
+        // rather than string concatenation, so a password containing a quote
+        // cannot terminate the statement.
+        var result = await Runtime.Containers.ExecAsync(
+            new ExecRequest(
+                endpoint.ContainerId,
+                [
+                    "psql", "--username", current.Username!, "--dbname", endpoint.DatabaseName!,
+                    "--set", "ON_ERROR_STOP=1",
+                    "--command", "ALTER USER CURRENT_USER WITH PASSWORD :'newpw'",
+                    "--set", $"newpw={replacement.Reveal()}",
+                ],
+                Entries(("PGPASSWORD", current.Password.Reveal(), true))),
+            null,
+            ct).ConfigureAwait(false);
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Password rotation failed: {result.StandardError}");
+        }
+    }
 }
 
 internal sealed class MySqlEngine(IContainerRuntime runtime) : DatabaseEngineBase(runtime)
@@ -340,6 +414,47 @@ internal sealed class MySqlEngine(IContainerRuntime runtime) : DatabaseEngineBas
             ($"{keyPrefix}_USER", details.Username!, false),
             ($"{keyPrefix}_PASSWORD", details.Password.Reveal(), true),
             ($"{keyPrefix}_URL", details.ConnectionString.Reveal(), true));
+    }
+
+    public override Task<BackupArtifact> BackupAsync(
+        BackupOperation operation,
+        Stream destination,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return LogicalBackup.RunAsync(
+            Runtime,
+            operation.Endpoint.ContainerId,
+            [
+                "mysqldump", "--user", operation.Credential.Username!, "--host", "127.0.0.1",
+                "--single-transaction", "--routines", "--triggers", "--events",
+                operation.Endpoint.DatabaseName!,
+            ],
+            // MYSQL_PWD rather than --password: an argument would be visible in
+            // the container's process list, and mysqldump warns about it anyway.
+            Entries(("MYSQL_PWD", operation.Credential.Password.Reveal(), true)),
+            destination,
+            operation.EngineSnapshot,
+            operation.Progress,
+            ct);
+    }
+
+    public override Task RestoreAsync(RestoreOperation operation, Stream source, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return LogicalBackup.RestoreAsync(
+            Runtime,
+            operation.Endpoint.ContainerId,
+            [
+                "mysql", "--user", operation.Credential.Username!, "--host", "127.0.0.1",
+                "--database", operation.Endpoint.DatabaseName!,
+                "--execute", $"SOURCE /tmp/{LogicalBackup.StagingFile}",
+            ],
+            Entries(("MYSQL_PWD", operation.Credential.Password.Reveal(), true)),
+            source,
+            ct);
     }
 }
 
@@ -426,6 +541,52 @@ internal sealed class MongoDbEngine(IContainerRuntime runtime) : DatabaseEngineB
             ($"{keyPrefix}_USER", details.Username!, false),
             ($"{keyPrefix}_PASSWORD", details.Password.Reveal(), true),
             ($"{keyPrefix}_URI", details.ConnectionString.Reveal(), true));
+    }
+
+    public override Task<BackupArtifact> BackupAsync(
+        BackupOperation operation,
+        Stream destination,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        // --archive sends a single stream to stdout instead of writing a
+        // directory tree, which is the only shape that can be piped out of an
+        // exec and hashed as it goes.
+        return LogicalBackup.RunAsync(
+            Runtime,
+            operation.Endpoint.ContainerId,
+            [
+                "mongodump", "--archive", "--gzip",
+                "--username", operation.Credential.Username!,
+                "--password", operation.Credential.Password.Reveal(),
+                "--authenticationDatabase", "admin",
+                "--db", operation.Endpoint.DatabaseName!,
+            ],
+            [],
+            destination,
+            operation.EngineSnapshot,
+            operation.Progress,
+            ct);
+    }
+
+    public override Task RestoreAsync(RestoreOperation operation, Stream source, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return LogicalBackup.RestoreAsync(
+            Runtime,
+            operation.Endpoint.ContainerId,
+            [
+                "mongorestore", "--gzip", "--drop",
+                "--archive=/tmp/" + LogicalBackup.StagingFile,
+                "--username", operation.Credential.Username!,
+                "--password", operation.Credential.Password.Reveal(),
+                "--authenticationDatabase", "admin",
+            ],
+            [],
+            source,
+            ct);
     }
 }
 

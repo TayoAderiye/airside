@@ -135,6 +135,7 @@ builder.Services.AddScoped<IHostAllocationReader, HostAllocationReader>();
 builder.Services.AddSingleton<AllocationGate>();
 builder.Services.AddScoped<DatabaseService>();
 builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
+builder.Services.AddScoped<IBackupStore, BackupStore>();
 builder.Services.AddHostedService<HostDiscoveryService>();
 
 builder.Services.AddSignalR();
@@ -207,6 +208,7 @@ app.MapAuditEndpoints();
 app.MapAccessEndpoints();
 app.MapSystemEndpoints();
 app.MapDatabaseEndpoints();
+app.MapBackupEndpoints();
 
 app.MapHub<JobsHub>("/hubs/jobs");
 app.MapHub<LogsHub>("/hubs/logs");

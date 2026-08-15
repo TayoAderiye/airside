@@ -91,7 +91,7 @@ opt-in leaves the volume; ports bind to loopback by default.
 
 ---
 
-## Phase 3 — Database operations
+## Phase 3 — Database operations ✅ *complete*
 
 **`Airside.Data`** — `Backup`, `Restore`, `SavedQuery`, `QueryHistoryEntry`;
 migration `0003_DatabaseOps` ×2.

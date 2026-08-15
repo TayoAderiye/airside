@@ -220,6 +220,204 @@ internal sealed class RedisEngine(IContainerRuntime runtime) : DatabaseEngineBas
             ($"{keyPrefix}_PASSWORD", details.Password.Reveal(), true),
             ($"{keyPrefix}_URL", details.ConnectionString.Reveal(), true));
     }
+
+    /// <summary>
+    /// A snapshot, not a dump: BGSAVE, wait for it to finish, copy the RDB out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There is no pg_dump equivalent. BGSAVE returns immediately and forks, so
+    /// the flow has to poll <c>INFO persistence</c> until
+    /// <c>rdb_bgsave_in_progress</c> clears — copying the file before then
+    /// captures a half-written RDB that loads as a truncated dataset.
+    /// </para>
+    /// <para>
+    /// <c>rdb_last_bgsave_status</c> is checked too. BGSAVE can fail after
+    /// starting — most often because the fork could not get memory, which is the
+    /// exact failure the 70% maxmemory default exists to avoid — and a failed
+    /// BGSAVE leaves the previous RDB in place, so copying it out would silently
+    /// produce a backup of whatever the state was hours ago.
+    /// </para>
+    /// </remarks>
+    public override async Task<BackupArtifact> BackupAsync(
+        BackupOperation operation,
+        Stream destination,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var container = operation.Endpoint.ContainerId;
+        var auth = Entries(("REDISCLI_AUTH", operation.Credential.Password.Reveal(), true));
+
+        var lastSaveBefore = await ReadInfoFieldAsync(container, auth, "rdb_last_save_time", ct)
+            .ConfigureAwait(false);
+
+        var trigger = await Runtime.Containers
+            .ExecAsync(new ExecRequest(container, ["redis-cli", "BGSAVE"], auth), null, ct)
+            .ConfigureAwait(false);
+
+        if (trigger.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"BGSAVE could not be started: {trigger.StandardError}");
+        }
+
+        operation.Progress?.Report("BGSAVE started; waiting for the fork to finish.");
+
+        var deadline = DateTimeOffset.UtcNow.Add(BgSaveTimeout);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var inProgress = await ReadInfoFieldAsync(container, auth, "rdb_bgsave_in_progress", ct)
+                .ConfigureAwait(false);
+
+            if (string.Equals(inProgress, "0", StringComparison.Ordinal))
+            {
+                var status = await ReadInfoFieldAsync(container, auth, "rdb_last_bgsave_status", ct)
+                    .ConfigureAwait(false);
+
+                if (!string.Equals(status, "ok", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "BGSAVE reported failure. The most common cause is the fork being unable to "
+                        + "obtain memory; the on-disk RDB is stale and must not be used as a backup.");
+                }
+
+                var lastSaveAfter = await ReadInfoFieldAsync(container, auth, "rdb_last_save_time", ct)
+                    .ConfigureAwait(false);
+
+                if (string.Equals(lastSaveBefore, lastSaveAfter, StringComparison.Ordinal))
+                {
+                    // Never advanced: what is on disk is the previous snapshot, not
+                    // this one. Copying it would produce a backup silently hours old.
+                    throw new InvalidOperationException(
+                        "BGSAVE completed but the save timestamp did not advance, so the RDB on disk "
+                        + "is not this snapshot.");
+                }
+
+                break;
+            }
+
+            await Task.Delay(PollInterval, ct).ConfigureAwait(false);
+        }
+
+        using var hashing = new HashingStream(destination);
+        await Runtime.Volumes
+            .CopyFromAsync(operation.DataVolumeName, RdbFileName, hashing, ct)
+            .ConfigureAwait(false);
+
+        if (hashing.BytesWritten == 0)
+        {
+            throw new InvalidOperationException("The RDB file was empty. Refusing to record an empty backup.");
+        }
+
+        return new BackupArtifact(
+            hashing.BytesWritten, hashing.Hash, operation.EngineSnapshot, BackupKind.Snapshot);
+    }
+
+    /// <summary>
+    /// Stop, replace the RDB, start.
+    /// </summary>
+    /// <remarks>
+    /// An RDB cannot be loaded into a running instance — Redis reads it once, at
+    /// startup. The container is already stopped by the caller because
+    /// <c>RequiresStopForRestore</c> says so; this writes the file and leaves
+    /// starting to the caller, so the stop and the start bracket the whole
+    /// operation rather than being buried in the middle of it.
+    /// </remarks>
+    public override async Task RestoreAsync(RestoreOperation operation, Stream source, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        ArgumentNullException.ThrowIfNull(source);
+
+        var container = await Runtime.Containers
+            .FindAsync(operation.Endpoint.ContainerId, ct)
+            .ConfigureAwait(false);
+
+        if (container?.State == ContainerRunState.Running)
+        {
+            // A guard, not a convenience. Writing dump.rdb underneath a running
+            // Redis does nothing until the next restart and then silently loses
+            // everything written since — the worst possible outcome, because it
+            // looks like it worked.
+            throw new InvalidOperationException(
+                "The Redis container is still running. An RDB restore requires the instance to be "
+                + "stopped first, or the file is ignored and then overwritten.");
+        }
+
+        operation.Progress?.Report("Replacing dump.rdb in the data volume.");
+        await Runtime.Volumes
+            .CopyIntoAsync(operation.DataVolumeName, RdbFileName, source, ct)
+            .ConfigureAwait(false);
+    }
+
+    public override async Task RotatePasswordAsync(
+        DatabaseEndpoint endpoint,
+        DatabaseCredentialValue current,
+        Secret replacement,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        // CONFIG SET requirepass takes effect immediately but does not survive a
+        // restart: the container's command line still carries the old value. The
+        // caller therefore recreates the container afterwards, and the platform
+        // treats rotation as a change that requires a restart rather than
+        // pretending it is live-only.
+        var result = await Runtime.Containers.ExecAsync(
+            new ExecRequest(
+                endpoint.ContainerId,
+                ["redis-cli", "CONFIG", "SET", "requirepass", replacement.Reveal()],
+                Entries(("REDISCLI_AUTH", current.Password.Reveal(), true))),
+            null,
+            ct).ConfigureAwait(false);
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Password rotation failed: {result.StandardError}");
+        }
+    }
+
+    private const string RdbFileName = "dump.rdb";
+
+    private static readonly TimeSpan BgSaveTimeout = TimeSpan.FromMinutes(30);
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+
+    /// <summary>Reads one field out of <c>INFO persistence</c>.</summary>
+    private async Task<string?> ReadInfoFieldAsync(
+        string containerId,
+        IReadOnlyList<EnvironmentEntry> auth,
+        string field,
+        CancellationToken ct)
+    {
+        using var output = new MemoryStream();
+
+        var result = await Runtime.Containers
+            .ExecAsync(new ExecRequest(containerId, ["redis-cli", "INFO", "persistence"], auth), output, ct)
+            .ConfigureAwait(false);
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"INFO persistence failed: {result.StandardError}");
+        }
+
+        var text = System.Text.Encoding.UTF8.GetString(output.ToArray());
+
+        foreach (var line in text.Split('\n'))
+        {
+            var trimmed = line.Trim();
+
+            if (trimmed.StartsWith(field + ":", StringComparison.Ordinal))
+            {
+                return trimmed[(field.Length + 1)..].Trim();
+            }
+        }
+
+        return null;
+    }
 }
 
 internal sealed class DatabaseEngineRegistry : IDatabaseEngineRegistry

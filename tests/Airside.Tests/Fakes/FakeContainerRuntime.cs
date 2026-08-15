@@ -140,6 +140,17 @@ internal sealed class FakeContainerOperations(FakeContainerRuntime parent) : ICo
         parent.Record($"exec:{string.Join(' ', request.Argv)}");
         return Task.FromResult(new ExecResult(0, string.Empty));
     }
+
+    public Task CopyIntoContainerAsync(
+        string containerId,
+        string containerPath,
+        string fileName,
+        Stream content,
+        CancellationToken ct)
+    {
+        parent.Record($"container.copyinto:{containerId}:{containerPath}/{fileName}");
+        return Task.CompletedTask;
+    }
 }
 
 internal sealed class FakeImageOperations : IImageOperations

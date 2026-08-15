@@ -51,6 +51,14 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
 
     public DbSet<Volume> Volumes => Set<Volume>();
 
+    public DbSet<Backup> Backups => Set<Backup>();
+
+    public DbSet<Restore> Restores => Set<Restore>();
+
+    public DbSet<SavedQuery> SavedQueries => Set<SavedQuery>();
+
+    public DbSet<QueryHistoryEntry> QueryHistory => Set<QueryHistoryEntry>();
+
     /// <summary>
     /// Every persisted timestamp is a UTC <see cref="DateTime"/>, not a
     /// <see cref="DateTimeOffset"/>.

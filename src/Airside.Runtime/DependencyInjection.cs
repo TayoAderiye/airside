@@ -64,7 +64,12 @@ public static class DependencyInjection
         services.AddSingleton<IDatabaseEngine, RedisEngine>();
         services.AddSingleton<IDatabaseEngineRegistry, DatabaseEngineRegistry>();
 
+        services.AddSingleton<Queries.IQueryConsoleFactory, Queries.QueryConsoleFactory>();
+
         services.AddScoped<IJobHandler, DatabaseProvisionHandler>();
+        services.AddScoped<IJobHandler, DatabaseBackupHandler>();
+        services.AddScoped<IJobHandler, DatabaseRestoreHandler>();
+        services.AddScoped<IJobHandler, RotateCredentialsHandler>();
         services.AddScoped<IJobHandler, DatabaseResizeHandler>();
         services.AddScoped<IJobHandler, DatabaseDeleteHandler>();
 
