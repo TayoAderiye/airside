@@ -253,20 +253,35 @@ done
 # install and leave them thinking nothing came up.
 [ "$i" -lt 30 ] || log "the dashboard has not answered yet — check 'docker logs airside-ui'"
 
+# The address on this machine's own interface, which on any cloud instance is
+# the private one. `hostname -I` cannot know the public address — that lives on
+# a NAT or an elastic IP the host never sees — so this is labelled for what it
+# is rather than printed as somewhere to browse to. Printing it unqualified sent
+# people to a tunnel command that silently hangs.
+#
+# Nothing here asks the internet what this host's public address is. A control
+# plane that phones out during install to answer a cosmetic question would be a
+# poor trade, and the operator already knows the address they connected over.
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 
 printf '\n'
 printf '  Airside is running.\n\n'
-printf '    Dashboard:  http://%s\n' "${IP:-<this host>}"
-printf '\n'
 printf '  The one-time setup token is in the API log:\n\n'
 printf '    docker logs airside-api | head -40\n'
 printf '\n'
 # Said plainly rather than buried: Let'\''s Encrypt does not issue certificates for
 # bare IP addresses, so there is no publicly trusted certificate until a domain
 # is attached, and the first login crosses the network in the clear.
-printf '  Until you attach a domain, the dashboard has no TLS certificate and\n'
-printf '  your password will cross the network unencrypted. Attach a domain as\n'
-printf '  the first thing you do, or reach the box over an SSH tunnel:\n\n'
-printf '    ssh -L 8080:localhost:80 %s\n' "${IP:-<this host>}"
+printf '  There is no TLS certificate until you attach a domain, so do not sign\n'
+printf '  in over a public address — your password would cross the network in\n'
+printf '  the clear. Tunnel from your own machine instead:\n\n'
+printf '    ssh -L 8080:localhost:80 <user>@<the address you connected over>\n'
+printf '\n'
+printf '  then open http://localhost:8080\n'
+printf '\n'
+printf '  This host answers on %s inside its own network.\n' "${IP:-an address it could not determine}"
+printf '  On a cloud instance that is the private address, not the public one.\n'
+printf '\n'
+printf '  Attaching a domain is what removes the need for the tunnel:\n'
+printf '  point an A record at this host, then set it in Settings.\n'
 printf '\n'
