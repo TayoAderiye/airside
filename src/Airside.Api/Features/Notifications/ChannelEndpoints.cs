@@ -30,7 +30,8 @@ public sealed record SaveChannelRequest(
     string? Secret,
     string MinimumSeverity = "warning",
     bool Enabled = true,
-    Dictionary<string, string>? Settings = null);
+    Dictionary<string, string>? Settings = null,
+    NotificationRoute? Routing = null);
 
 public sealed record ChannelDto(
     Guid Id,
@@ -45,7 +46,8 @@ public sealed record ChannelDto(
     string? LastAttemptError,
     int ConsecutiveFailures,
     DateTimeOffset? MutedUntil,
-    IReadOnlyDictionary<string, string> Settings)
+    IReadOnlyDictionary<string, string> Settings,
+    NotificationRoute Routing)
 {
     public static ChannelDto From(NotificationChannel c)
     {
@@ -71,9 +73,37 @@ public sealed record ChannelDto(
             c.LastAttemptError,
             c.ConsecutiveFailures,
             c.MutedUntil is null ? null : new DateTimeOffset(c.MutedUntil.Value, TimeSpan.Zero),
-            settings);
+            settings,
+            NotificationRoute.FromJson(c.RoutingJson));
     }
 }
+
+public sealed record PreviewRouteRequest(NotificationRoute? Routing, string MinimumSeverity = "warning");
+
+/// <param name="Warning">
+/// Set when the rule matched nothing at all — the one outcome that looks like a
+/// working configuration and is not.
+/// </param>
+public sealed record RoutePreviewDto(
+    int Considered,
+    int WouldSend,
+    IReadOnlyList<RoutePreviewEntryDto> Notifications,
+    string? Warning);
+
+public sealed record RoutePreviewEntryDto(
+    string Title,
+    string? Code,
+    string Severity,
+    string? ResourceKind,
+    bool WouldSend,
+    string? Reason);
+
+/// <param name="Warning">
+/// Set when the channels between them would not deliver an error. Every channel
+/// can be individually sensible and still leave no path for the thing that
+/// matters.
+/// </param>
+public sealed record ChannelListDto(IReadOnlyList<ChannelDto> Channels, string? Warning);
 
 internal static class ChannelEndpoints
 {
@@ -85,6 +115,8 @@ internal static class ChannelEndpoints
         group.MapPut("/", SaveAsync).RequirePermission(Permissions.ServerManage);
         group.MapDelete("/{id:guid}", DeleteAsync).RequirePermission(Permissions.ServerManage);
 
+        group.MapPost("/preview", PreviewAsync).RequirePermission(Permissions.ServerManage);
+
         group.MapPost("/{id:guid}/test", TestAsync)
             .RequirePermission(Permissions.ServerManage)
             .RequireRateLimiting(RateLimitPolicies.Destructive);
@@ -92,7 +124,7 @@ internal static class ChannelEndpoints
         return app;
     }
 
-    private static async Task<Ok<IReadOnlyList<ChannelDto>>> ListAsync(
+    private static async Task<Ok<ChannelListDto>> ListAsync(
         AirsideDbContext db,
         CancellationToken ct)
     {
@@ -102,7 +134,55 @@ internal static class ChannelEndpoints
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        return TypedResults.Ok<IReadOnlyList<ChannelDto>>([.. rows.Select(ChannelDto.From)]);
+        return TypedResults.Ok(new ChannelListDto(
+            [.. rows.Select(ChannelDto.From)],
+            DescribeErrorCoverage(rows)));
+    }
+
+    /// <summary>
+    /// Warns when nothing would receive an error.
+    /// </summary>
+    /// <remarks>
+    /// The state routing rules make reachable and severity alone did not: every
+    /// channel individually sensible, and between them no path for the one thing
+    /// that matters. It looks exactly like a working configuration, and the way it
+    /// is discovered is an incident nobody was told about — so it is said out loud
+    /// on the page where channels are managed.
+    /// </remarks>
+    private static string? DescribeErrorCoverage(List<NotificationChannel> channels)
+    {
+        var enabled = channels.FindAll(c => c.Enabled);
+
+        if (enabled.Count == 0)
+        {
+            return channels.Count == 0
+                ? null
+                : "Every notification channel is disabled, so nothing leaves Airside. Notifications are "
+                  + "still recorded and visible here.";
+        }
+
+        // A synthetic error with no code and no resource: anything that filters
+        // this out filters out the general "something is badly wrong" case.
+        var reaches = enabled.Exists(c =>
+            NotificationRouter.Evaluate(
+                NotificationRoute.FromJson(c.RoutingJson),
+                NotificationSeverityLevel.Error,
+                ToLevel(c.MinimumSeverity),
+                code: null,
+                resourceKind: null,
+                resourceId: null).Matches
+            || NotificationRouter.Evaluate(
+                NotificationRoute.FromJson(c.RoutingJson),
+                NotificationSeverityLevel.Error,
+                ToLevel(c.MinimumSeverity),
+                code: "update.prepare_failed",
+                resourceKind: null,
+                resourceId: null).Matches);
+
+        return reaches
+            ? null
+            : "No enabled channel would receive an error-level notification — every one of them filters "
+              + "errors out. Notifications are still recorded here, but nothing will reach you.";
     }
 
     private static async Task<Results<Ok<ChannelDto>, ProblemHttpResult>> SaveAsync(
@@ -155,6 +235,7 @@ internal static class ChannelEndpoints
         channel.MinimumSeverity = severity;
         channel.Enabled = request.Enabled;
         channel.SettingsJson = JsonSerializer.Serialize(request.Settings ?? []);
+        channel.RoutingJson = (request.Routing ?? NotificationRoute.All).ToJson();
 
         if (!string.IsNullOrWhiteSpace(request.Secret))
         {
@@ -320,6 +401,82 @@ internal static class ChannelEndpoints
     /// The alternative is a channel that tests green and stays silent during an
     /// actual incident.
     /// </remarks>
+    /// <summary>
+    /// Shows which recent notifications a rule would have sent, before it is saved.
+    /// </summary>
+    /// <remarks>
+    /// The reason this exists is the failure routing rules introduce: a rule that
+    /// accidentally matches nothing leaves a channel quiet, and nobody finds out
+    /// until the incident it was meant to report. Checking against real history —
+    /// with the same function the dispatcher uses, so the answer cannot differ —
+    /// turns that into something visible before it matters.
+    /// </remarks>
+    private static async Task<Ok<RoutePreviewDto>> PreviewAsync(
+        PreviewRouteRequest request,
+        AirsideDbContext db,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var route = request.Routing ?? NotificationRoute.All;
+
+        var minimum = Enum.TryParse<NotificationSeverity>(request.MinimumSeverity, ignoreCase: true, out var parsed)
+            ? parsed
+            : NotificationSeverity.Warning;
+
+        // Real history rather than invented examples: a rule is usually wrong
+        // about the codes this instance actually emits, not about the ones it
+        // might.
+        var recent = await db.Notifications
+            .AsNoTracking()
+            .OrderByDescending(n => n.LastSeenAt)
+            .Take(100)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var results = recent.ConvertAll(n =>
+        {
+            var decision = NotificationRouter.Evaluate(
+                route,
+                ToLevel(n.Severity),
+                ToLevel(minimum),
+                n.Code,
+                n.ResourceKind,
+                n.ResourceId);
+
+            return new RoutePreviewEntryDto(
+                n.Title,
+                n.Code,
+                n.Severity.ToString().ToLowerInvariant(),
+                n.ResourceKind,
+                decision.Matches,
+                decision.Reason);
+        });
+
+        var matched = results.Count(r => r.WouldSend);
+
+        return TypedResults.Ok(new RoutePreviewDto(
+            recent.Count,
+            matched,
+            results,
+
+            // Said plainly, because a rule that matches nothing is the whole risk
+            // and it looks identical to a rule that is simply waiting for its
+            // first matching event.
+            recent.Count > 0 && matched == 0
+                ? "This rule matches none of the last " + recent.Count + " notifications. That may be "
+                  + "correct if you are filtering for something that has not happened yet — but check the "
+                  + "codes above against what you meant to select."
+                : null));
+    }
+
+    private static NotificationSeverityLevel ToLevel(NotificationSeverity severity) => severity switch
+    {
+        NotificationSeverity.Error => NotificationSeverityLevel.Error,
+        NotificationSeverity.Warning => NotificationSeverityLevel.Warning,
+        _ => NotificationSeverityLevel.Info,
+    };
+
     private static async Task<Results<Ok<ChannelDto>, ProblemHttpResult>> TestAsync(
         Guid id,
         AirsideDbContext db,

@@ -263,8 +263,9 @@ permanent failure on a refused address.
 
 ### Not built
 
-- No per-notification routing rules beyond severity — a channel cannot be told
-  "only certificates" or "only this application".
+- ~~No per-notification routing rules beyond severity.~~ Added: include and
+  exclude lists over codes, resource kinds, and specific resources, with a
+  preview endpoint and a warning when no channel would receive an error.
 - SMTP is not covered by the outbound address rules. An internal relay on a
   private address is the normal arrangement, and an SMTP client cannot be turned
   into a useful request against the metadata service or the proxy's admin API.

@@ -18,6 +18,7 @@ public class NotificationChannelConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(x => x.MinimumSeverity).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.LastAttemptError).HasMaxLength(512);
         builder.Property(x => x.SettingsJson).IsRequired();
+        builder.Property(x => x.RoutingJson).IsRequired();
 
         builder.HasIndex(x => x.Name).IsUnique();
         builder.HasQueryFilter(x => x.DeletedAt == null);
@@ -34,6 +35,7 @@ public class NotificationDeliveryConfiguration : IEntityTypeConfiguration<Notifi
 
         builder.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.LastError).HasMaxLength(512);
+        builder.Property(x => x.SkipReason).HasMaxLength(256);
 
         // One attempt record per notification per channel. The unique index is
         // what makes "has this already been offered here" a lookup rather than a

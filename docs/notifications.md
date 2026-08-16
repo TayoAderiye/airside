@@ -23,6 +23,55 @@ a Slack URL whose token was revoked, an SMTP account that authenticates but
 cannot send as the configured from-address, a receiver that returns 200 for
 anything.
 
+## Routing rules
+
+Beyond severity, a channel can be narrowed by what the notification is about.
+
+```json
+{
+  "includeCodes": ["domain", "backup"],
+  "excludeCodes": ["domain.awaiting_certificate"],
+  "includeResourceKinds": ["domain"],
+  "excludeResourceIds": ["01a0..."]
+}
+```
+
+- **Codes match on segment boundaries.** `domain` matches
+  `domain.certificate_expiring` but not `domainless.thing`. Trailing `.` or `*`
+  are accepted and mean the same thing.
+- **Empty means everything.** A channel with no rules sends everything it is
+  offered, which is what every channel created before routing existed was already
+  doing.
+- **Exclude beats include.** "Everything under `domain`, except the expiry
+  warnings" is a sentence people say; the reverse is not. So the two lists never
+  have to be read in order.
+
+### Check a rule before relying on it
+
+`POST /api/v1/notification-channels/preview` runs a rule against the last hundred
+notifications and shows which would have been sent, and why each of the rest
+would not:
+
+```json
+{ "considered": 40, "wouldSend": 0,
+  "warning": "This rule matches none of the last 40 notifications…" }
+```
+
+That warning is the point. A rule that accidentally matches nothing leaves a
+channel quiet, and it looks identical to a channel that is simply waiting for its
+first matching event — until the incident it was meant to report.
+
+The channel list carries the same idea at a larger scale: if **no enabled channel
+would receive an error**, it says so. Every channel can be individually sensible
+and still leave no path for the thing that matters.
+
+### Why a notification did not arrive
+
+Filtered notifications are recorded, not dropped. Each carries the reason —
+`'update.prepare_failed' does not match any code this channel sends` — so a
+notification that was deliberately filtered is distinguishable from a channel
+that is silently broken. Without that, the two look the same from the outside.
+
 ## Where Airside will not send
 
 A webhook is a way to make **this server** issue an HTTP request, and this server

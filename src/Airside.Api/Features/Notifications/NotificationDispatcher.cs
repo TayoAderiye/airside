@@ -161,15 +161,25 @@ public sealed class NotificationDispatcher(
                     continue;
                 }
 
-                var below = notification.Severity < channel.MinimumSeverity;
+                // Severity and the routing rules are decided together, by the same
+                // function the preview endpoint calls — so what an operator is
+                // shown before saving a rule is what actually happens.
+                var decision = NotificationRouter.Evaluate(
+                    NotificationRoute.FromJson(channel.RoutingJson),
+                    ToLevel(notification.Severity),
+                    ToLevel(channel.MinimumSeverity),
+                    notification.Code,
+                    notification.ResourceKind,
+                    notification.ResourceId);
 
                 db.NotificationDeliveries.Add(new NotificationDelivery
                 {
                     Id = Guid.CreateVersion7(),
                     NotificationId = notification.Id,
                     ChannelId = channel.Id,
-                    Status = below ? DeliveryStatus.Skipped : DeliveryStatus.Pending,
-                    NextAttemptAt = below ? null : now,
+                    Status = decision.Matches ? DeliveryStatus.Pending : DeliveryStatus.Skipped,
+                    NextAttemptAt = decision.Matches ? now : null,
+                    SkipReason = decision.Reason,
                 });
             }
         }
@@ -348,6 +358,13 @@ public sealed class NotificationDispatcher(
 
         return new ChannelTarget(channel.Id, channel.Name, channel.Kind, channel.Endpoint, secret, settings);
     }
+
+    private static NotificationSeverityLevel ToLevel(NotificationSeverity severity) => severity switch
+    {
+        NotificationSeverity.Error => NotificationSeverityLevel.Error,
+        NotificationSeverity.Warning => NotificationSeverityLevel.Warning,
+        _ => NotificationSeverityLevel.Info,
+    };
 
     private static NotificationEnvelope BuildEnvelope(Notification notification, InstanceSettings settings) =>
         new(

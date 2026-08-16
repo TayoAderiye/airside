@@ -44,6 +44,16 @@ public class NotificationChannel : Entity, ISoftDeletable
     /// </remarks>
     public NotificationSeverity MinimumSeverity { get; set; } = NotificationSeverity.Warning;
 
+    /// <summary>
+    /// Routing rules beyond severity, as JSON. Empty means everything.
+    /// </summary>
+    /// <remarks>
+    /// Empty is "send everything" rather than "send nothing", which is what makes
+    /// this safe to add to channels that already exist — the alternative would
+    /// have silently stopped every one of them the moment the column appeared.
+    /// </remarks>
+    public string RoutingJson { get; set; } = "{}";
+
     public DateTime? LastAttemptAt { get; set; }
 
     public bool? LastAttemptSucceeded { get; set; }
@@ -102,6 +112,16 @@ public class NotificationDelivery : Entity
     public DateTime? NextAttemptAt { get; set; }
 
     public string? LastError { get; set; }
+
+    /// <summary>
+    /// Why a notification was not offered to this channel.
+    /// </summary>
+    /// <remarks>
+    /// The answer to "why did Slack not get this". Without it a filtered
+    /// notification and a silently broken channel look identical from the outside,
+    /// which is the failure mode routing rules introduce.
+    /// </remarks>
+    public string? SkipReason { get; set; }
 
     public DateTime? DeliveredAt { get; set; }
 }

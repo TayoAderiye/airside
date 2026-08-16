@@ -1258,6 +1258,10 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("RoutingJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<Guid>("RowVersion")
                         .HasColumnType("uuid");
 
@@ -1309,6 +1313,10 @@ namespace Airside.Data.Migrations.Postgres.Migrations
 
                     b.Property<Guid>("RowVersion")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("SkipReason")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("Status")
                         .IsRequired()
