@@ -157,7 +157,9 @@ done
 log "Waiting for the dashboard"
 i=0
 while [ "$i" -lt 30 ]; do
-  if docker exec airside-ui wget -qO- http://localhost:3000/login >/dev/null 2>&1; then
+  # 127.0.0.1 rather than localhost: that name also resolves to ::1, which
+  # busybox wget tries first and Next does not listen on.
+  if docker exec airside-ui wget -qO- http://127.0.0.1:3000/login >/dev/null 2>&1; then
     break
   fi
   i=$((i + 1))
