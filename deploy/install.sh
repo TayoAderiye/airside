@@ -29,6 +29,8 @@ case "$(uname -s)" in
   *) die "Airside manages a Linux host; this is $(uname -s)" ;;
 esac
 
+command -v curl >/dev/null 2>&1 || die "curl is required (this fetches the compose file and, if needed, Docker)"
+
 if ! command -v docker >/dev/null 2>&1; then
   log "Docker is not installed. Installing it from get.docker.com..."
   curl -fsSL https://get.docker.com | sh || die "Docker installation failed"
@@ -96,6 +98,41 @@ mkdir -p "$AIRSIDE_DATA/keys" "$AIRSIDE_DATA/data" "$AIRSIDE_DATA/volumes" "$AIR
 chmod 700 "$AIRSIDE_DATA/keys"
 
 mkdir -p "$AIRSIDE_ROOT"
+
+# --- compose files -----------------------------------------------------------
+#
+# Fetched at the tag being installed rather than from main. The compose file
+# names the images, their mounts and their environment, so pairing one commit's
+# compose file with another commit's images is how a container comes up missing
+# a volume it now depends on.
+#
+# Without this the directory has no compose file at all and the next step fails
+# with "no configuration file provided: not found" — which reads as a broken
+# Docker install rather than a missing download.
+
+REPO_RAW="${AIRSIDE_REPO_RAW:-https://raw.githubusercontent.com/TayoAderiye/airside}"
+
+fetch_deploy_file() {
+  name="$1"
+  dest="$AIRSIDE_ROOT/$name"
+
+  curl -fsSL "$REPO_RAW/v$AIRSIDE_VERSION/deploy/$name" -o "$dest.new" \
+    || die "could not fetch deploy/$name for v$AIRSIDE_VERSION from $REPO_RAW"
+
+  # A local edit is kept rather than silently discarded. An operator who changed
+  # a memory limit or added a mount should find it next to the new file, not
+  # discover on the next restart that it is gone.
+  if [ -f "$dest" ] && ! cmp -s "$dest.new" "$dest"; then
+    cp "$dest" "$dest.airside.bak"
+    warn "$name differed from the published v$AIRSIDE_VERSION; your copy is at $name.airside.bak"
+  fi
+
+  mv "$dest.new" "$dest"
+}
+
+log "Fetching the compose files for $AIRSIDE_VERSION"
+fetch_deploy_file docker-compose.yml
+fetch_deploy_file caddy.json
 
 # --- configuration -----------------------------------------------------------
 
