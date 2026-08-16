@@ -81,8 +81,10 @@ jobs:
 
           # A ghcr repository name must be lowercase and a GitHub account need not
           # be, so the owner is folded here rather than interpolated directly.
-          # Actions expressions have no lowercase function, which is why this is a
-          # shell step and not ${{ }}.
+          # Actions expressions have no lowercase function, which is why this is
+          # done in shell. Note the comment cannot itself show an empty Actions
+          # expression: the parser scans the whole run block and reads one as a
+          # syntax error, shell comment or not.
           echo "owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
