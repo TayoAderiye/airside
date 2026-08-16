@@ -100,11 +100,29 @@ public sealed class CaddyProxyManager(
 
         using var inserted = await http.SendAsync(insert, ct).ConfigureAwait(false);
 
-        if (!inserted.IsSuccessStatusCode)
+        if (inserted.IsSuccessStatusCode)
         {
-            var body = await inserted.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            logger.LogInformation("Added proxy route for {Hostname}", route.Hostname);
+            return;
+        }
+
+        // Inserting at index 0 requires index 0 to exist. Against an empty route
+        // list Caddy answers "array index out of bounds: 0", and an empty list is
+        // exactly the state a replaced proxy container starts in — so the one
+        // moment every route has to be restored was the one moment none could be.
+        //
+        // Appending is equivalent when there is nothing to come before.
+        using var appended = await http.PostAsJsonAsync(
+            $"/config/apps/http/servers/{_options.ServerName}/routes",
+            payload,
+            Json,
+            ct).ConfigureAwait(false);
+
+        if (!appended.IsSuccessStatusCode)
+        {
+            var body = await appended.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             throw new ProxyUnavailableException(
-                $"Caddy rejected the route for {route.Hostname}: {inserted.StatusCode} {Trim(body)}");
+                $"Caddy rejected the route for {route.Hostname}: {appended.StatusCode} {Trim(body)}");
         }
 
         logger.LogInformation("Added proxy route for {Hostname}", route.Hostname);

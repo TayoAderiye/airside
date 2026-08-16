@@ -193,6 +193,34 @@ public class DashboardRouteTests
         Assert.EndsWith("/routes/0", write.Path, StringComparison.Ordinal);
     }
 
+
+    [Fact]
+    public async Task AnEmptyRouteListFallsBackToAppending()
+    {
+        // Caddy refuses to insert at index 0 when index 0 does not exist:
+        // "array index out of bounds: 0". An empty route list is exactly the
+        // state a replaced proxy container boots into, from caddy.json — so the
+        // one moment every route must be restored was the one moment none could
+        // be, and an operator with a dashboard domain set stayed locked out.
+        var handler = new RecordingHandler(
+            (HttpStatusCode.InternalServerError, "unknown object id"),
+            (HttpStatusCode.InternalServerError, "{\"error\":\"[/config/...] array index out of bounds: 0\"}"),
+            (HttpStatusCode.OK, "{}"));
+
+        var client = new HttpClient(handler) { BaseAddress = new Uri("http://airside-proxy:2019") };
+        var proxy = new CaddyProxyManager(
+            client, Options.Create(new CaddyOptions()), NullLogger<CaddyProxyManager>.Instance);
+
+        await proxy.UpsertRouteAsync(
+            new RouteSpec("app.example.com", new UpstreamTarget("airside-app-web-abc", 8080)),
+            CancellationToken.None);
+
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Put, handler.Requests[1].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[2].Method);
+        Assert.EndsWith("/routes", handler.Requests[2].Path, StringComparison.Ordinal);
+    }
+
     private static (CaddyProxyManager Proxy, RecordingHandler Handler) BuildLister(string body)
     {
         var handler = new RecordingHandler((HttpStatusCode.OK, body));
