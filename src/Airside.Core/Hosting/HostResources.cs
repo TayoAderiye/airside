@@ -15,12 +15,72 @@ public sealed record HostCapacity(
     DateTimeOffset DiscoveredAt);
 
 /// <summary>Headroom kept for the host OS and the control plane itself.</summary>
+/// <remarks>
+/// <para>
+/// A share of what the host has, bounded at both ends, rather than a fixed
+/// amount. A fixed reserve does not scale down, and the failure is total: on a
+/// one-core machine a reserve of one core leaves nothing, so the allocation gate
+/// refuses every workload with
+/// <c>"Not enough cpu available. requested 500000000, available 0"</c> — on an
+/// idle host with a whole core spare.
+/// </para>
+/// <para>
+/// That was the behaviour on a 2 GB, 1 vCPU instance: the reserve took the
+/// entire core, most of the memory, and more storage than the disk had. Airside
+/// recommends 2 GB as a starting point and could not deploy anything on one.
+/// </para>
+/// <para>
+/// It is bounded at the top because the control plane's own footprint is roughly
+/// constant — Postgres, the API, the dashboard and the proxy do not need more
+/// headroom on a bigger box, so a plain percentage would waste it.
+/// </para>
+/// </remarks>
 public sealed record HostReserve(long CpuNanos, long MemoryBytes, long StorageBytes)
 {
+    /// <summary>The reserve for a host of this size.</summary>
+    public static HostReserve For(long cpuNanos, long memoryBytes, long storageBytes) => new(
+        // A quarter of the CPU, never less than a fifth of a core and never more
+        // than one. The control plane is bursty rather than pinned, so this is
+        // headroom for scheduling, not a permanent allocation.
+        CpuNanos: Bounded(cpuNanos, 0.25, 200_000_000L, 1_000_000_000L),
+
+        // A quarter of memory, floor 384 MiB, ceiling 2 GiB. Measured against a
+        // real install: Postgres, the API, the dashboard and Caddy together sit
+        // comfortably under 800 MiB on a small host.
+        MemoryBytes: Bounded(memoryBytes, 0.25, 384L * 1024 * 1024, 2L * 1024 * 1024 * 1024),
+
+        // A fifth of the disk, floor 2 GiB, ceiling 20 GiB. The old fixed 10 GiB
+        // exceeded the whole filesystem on an 8 GiB cloud image, which made
+        // every storage request fail arithmetic before it reached a check.
+        StorageBytes: Bounded(storageBytes, 0.20, 2L * 1024 * 1024 * 1024, 20L * 1024 * 1024 * 1024));
+
+    /// <summary>
+    /// Kept for a host whose capacity is not known yet.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the small end. A host row is created before discovery has
+    /// run, and guessing high there would refuse workloads on a machine that
+    /// turns out to be large.
+    /// </remarks>
     public static HostReserve Default { get; } = new(
-        CpuNanos: 1_000_000_000L,
-        MemoryBytes: 1L * 1024 * 1024 * 1024,
-        StorageBytes: 10L * 1024 * 1024 * 1024);
+        CpuNanos: 200_000_000L,
+        MemoryBytes: 384L * 1024 * 1024,
+        StorageBytes: 2L * 1024 * 1024 * 1024);
+
+    private static long Bounded(long capacity, double share, long floor, long ceiling)
+    {
+        if (capacity <= 0)
+        {
+            return floor;
+        }
+
+        var proportional = (long)(capacity * share);
+
+        // The floor is itself clamped to the capacity: on a host smaller than the
+        // floor, reserving the floor would leave a negative amount available and
+        // the gate would report nonsense.
+        return Math.Clamp(proportional, Math.Min(floor, capacity), ceiling);
+    }
 }
 
 /// <summary>

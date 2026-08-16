@@ -119,6 +119,17 @@ public sealed class HostDiscoveryService(
             host.CapacityCpuNanos = capacity.CpuNanos;
             host.CapacityMemoryBytes = capacity.MemoryBytes;
             host.CapacityStorageBytes = capacity.StorageBytes;
+
+            // Recomputed whenever capacity is, because the reserve is a share of
+            // it. The row is created before any discovery has run, so without
+            // this it keeps the conservative starting value forever — and an
+            // instance resized underneath Airside would keep the reserve it had
+            // when it was smaller.
+            var reserve = HostReserve.For(capacity.CpuNanos, capacity.MemoryBytes, capacity.StorageBytes);
+
+            host.ReserveCpuNanos = reserve.CpuNanos;
+            host.ReserveMemoryBytes = reserve.MemoryBytes;
+            host.ReserveStorageBytes = reserve.StorageBytes;
             host.StorageEnforcement = await reader
                 .DetectStorageEnforcementAsync(host.VolumeRoot, ct)
                 .ConfigureAwait(false);

@@ -33,6 +33,13 @@ export function DatabaseCreateForm() {
   const [memory, setMemory] = useState(2)
   const [storage, setStorage] = useState(20)
 
+  // Required by every engine that has the concept, and rejected outright by
+  // those that do not — Redis exposes sixteen numbered logical databases chosen
+  // at connect time, so a name there is a validation error rather than an
+  // ignored field. The engine catalogue says which is which.
+  const [databaseName, setDatabaseName] = useState('')
+  const [username, setUsername] = useState('app')
+
   const [maxMemory, setMaxMemory] = useState(1.5)
   const [policy, setPolicy] = useState<MaxMemoryPolicy>('allkeys-lru')
   const [aof, setAof] = useState(true)
@@ -82,7 +89,28 @@ export function DatabaseCreateForm() {
     return null
   }, [name])
 
-  const canSubmit = name.length > 1 && !nameError && !!engine && !!version && !busy
+  const caps = engine?.capabilities
+  const needsDatabaseName = caps?.supportsDatabaseName ?? false
+  const needsUsername = caps?.supportsUserAccounts ?? false
+
+  /**
+   * A default derived from the slug, not left blank.
+   *
+   * Identifiers cannot carry hyphens without quoting in Postgres or MySQL, so a
+   * slug of `payments-primary` becomes `payments_primary`. The operator can
+   * change it; what matters is that the obvious path does not fail validation.
+   */
+  const suggestedDatabaseName = name.replace(/-/g, '_')
+  const effectiveDatabaseName = databaseName.trim() || suggestedDatabaseName
+
+  const canSubmit =
+    name.length > 1 &&
+    !nameError &&
+    !!engine &&
+    !!version &&
+    (!needsDatabaseName || effectiveDatabaseName.length > 0) &&
+    (!needsUsername || username.trim().length > 0) &&
+    !busy
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -107,6 +135,13 @@ export function DatabaseCreateForm() {
           // storage is only accounted, and an immediate failure on a host that
           // enforces quotas.
           storageBytes: giBToBytes(storage),
+
+          // Sent only where the engine has the concept. Redis rejects both
+          // outright — it authenticates with a password and has no named
+          // database — so sending them anyway turns a valid request into a
+          // validation error.
+          ...(needsDatabaseName ? { databaseName: effectiveDatabaseName } : {}),
+          ...(needsUsername ? { username: username.trim() } : {}),
           ...(isRedis
             ? {
                 maxMemoryBytes: giBToBytes(maxMemory),
@@ -186,6 +221,43 @@ export function DatabaseCreateForm() {
               ))}
             </NativeSelect>
           </Field>
+
+          {needsDatabaseName && (
+            <Field
+              label="Database name"
+              htmlFor="db-dbname"
+              required
+              hint="Defaults to the slug with hyphens replaced, which identifiers cannot carry unquoted."
+            >
+              <TextInput
+                id="db-dbname"
+                value={databaseName}
+                onChange={(e) => setDatabaseName(e.target.value)}
+                placeholder={suggestedDatabaseName || 'payments_primary'}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+          )}
+
+          {needsUsername && (
+            <Field label="Username" htmlFor="db-user" required hint="The account the application connects as.">
+              <TextInput
+                id="db-user"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </Field>
+          )}
+
+          {!needsDatabaseName && engine && (
+            <Hint>
+              {engine.displayName} has no named database — it exposes numbered logical databases chosen at connect
+              time. The password is generated and stored encrypted.
+            </Hint>
+          )}
         </Panel>
 
         <Panel title="Resources" description="Limits are reserved from host capacity as soon as the database is created.">
