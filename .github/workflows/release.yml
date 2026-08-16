@@ -143,8 +143,13 @@ jobs:
 
       - name: Hand the digest to the merge step
         run: |
+          # The "sha256:" prefix is stripped because upload-artifact rejects a
+          # colon in a filename, and the merge step reassembles the reference as
+          # image@sha256:<name>. Leaving it on fails after the image has already
+          # been pushed, which looks like a build failure and is not one.
           mkdir -p /tmp/digests
-          touch "/tmp/digests/${{ steps.push.outputs.digest }}"
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
 
       - uses: actions/upload-artifact@v4
         with:
