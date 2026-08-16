@@ -795,6 +795,12 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("PreviousDashboardDomain")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("PreviousDashboardDomainUntil")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("PreviousImageTag")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");

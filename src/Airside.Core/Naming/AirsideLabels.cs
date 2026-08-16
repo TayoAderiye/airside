@@ -57,5 +57,16 @@ public static class AirsideLabels
         /// an update that died with no API and no updater running (ARCHITECTURE.md §7).
         /// </summary>
         public const string State = Root + "/state.json";
+
+        /// <summary>
+        /// Written by <c>airside domain reset</c>; consumed and deleted at startup.
+        /// </summary>
+        /// <remarks>
+        /// A file rather than a database write, because the CLI is deliberately
+        /// dependency-free — it has to work on the day the API does not, which is
+        /// exactly when this command is needed. Presence of the file is the whole
+        /// signal; its contents are ignored.
+        /// </remarks>
+        public const string DomainReset = Root + "/domain-reset";
     }
 }

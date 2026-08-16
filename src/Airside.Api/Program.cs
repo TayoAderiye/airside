@@ -159,6 +159,7 @@ builder.Services.Configure<ReachabilityOptions>(builder.Configuration.GetSection
 builder.Services.AddHostedService<CertificateExpiryService>();
 builder.Services.AddAirsideForwardedHeaders(builder.Configuration);
 builder.Services.AddHostedService<CertificateStoreCheck>();
+builder.Services.AddHostedService<DomainResetCheck>();
 builder.Services.Configure<CaddyOptions>(builder.Configuration.GetSection(CaddyOptions.Section));
 builder.Services.AddHostedService<ProxyReconciliationService>();
 builder.Services.AddHostedService<HostDiscoveryService>();
@@ -242,6 +243,7 @@ app.MapDatabaseEndpoints();
 app.MapBackupEndpoints();
 app.MapApplicationEndpoints();
 app.MapDomainEndpoints();
+app.MapDashboardDomainEndpoints();
 
 app.MapRealtimeEndpoints();
 if (app.Environment.IsDevelopment())

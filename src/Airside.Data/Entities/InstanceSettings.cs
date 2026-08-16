@@ -16,6 +16,19 @@ public class InstanceSettings : Entity
 
     public string? DashboardDomain { get; set; }
 
+    /// <summary>
+    /// The hostname the dashboard was reached on before the last change.
+    /// </summary>
+    /// <remarks>
+    /// Kept live until <see cref="PreviousDashboardDomainUntil"/> so that changing
+    /// the dashboard's address does not cut off the administrator making the
+    /// change while DNS propagates. Without the grace period, one mistyped record
+    /// locks the only person who could fix it out of the tool.
+    /// </remarks>
+    public string? PreviousDashboardDomain { get; set; }
+
+    public DateTime? PreviousDashboardDomainUntil { get; set; }
+
     public StoreProvider StoreProvider { get; set; }
 
     public string? CurrentImageTag { get; set; }

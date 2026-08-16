@@ -185,6 +185,53 @@ had one row a character too wide.
 
 ---
 
+## Domains and TLS — **done**
+
+Built to a separate specification after Phase 5, in its stated build order.
+
+**Pre-flight** (`Airside.Runtime/Domains`) — DNS through a public resolver rather
+than the host's, CAA, the IPv6-preference trap, proxied-DNS detection, port
+conflicts, hostname conflicts naming the holder, and ACME rate-limit accounting
+against an embedded Public Suffix List. Every check reports what it found beside
+what it expected.
+
+**TLS modes** — `Automatic`, `Manual`, `External`, and `Internal` are built;
+`AutomaticDns` and `OnDemand` are modelled and rejected at the service layer. The
+mode is required with no default.
+
+**Certificates** — upload validation catches a mismatched key, an incomplete or
+misordered chain, an expired intermediate under a valid leaf, and a wildcard that
+does not cover its own apex. Keys are encrypted into their own table. Expiry is
+swept every six hours and warned at 30/14/7/3/1/0 days.
+
+**Lifecycle** — redirects (308), HSTS with typed confirmation for preload, a
+maintenance page for stopped applications, a grace period on detach, and the
+dashboard domain guarded by DNS verification before the switch plus
+`airside domain reset` as the way back.
+
+### Found by running it
+
+- Caddy's `skip` and `skip_certificates` are not interchangeable. `skip` removes
+  the TLS listener entirely, so Manual mode loaded an uploaded certificate
+  perfectly and served nothing on 443. One flat skip list became three.
+- Reconciliation restored routes but not certificates or network attachments, so
+  a replaced proxy came back told not to obtain a certificate, holding none, and
+  with no path to any application. Every reasserted route returned 502.
+- `deploy/caddy.json` comment keys stopped Caddy booting; a wildcard hostname was
+  rejected as invalid syntax before reaching the wildcard-specific advice.
+
+### Not built
+
+- Moving a domain between applications is detach-then-attach rather than one
+  atomic operation. The conflict check blocks the overlap, so it is safe, but it
+  is two steps.
+- No apex/www convenience: the redirect field exists and has to be set by hand.
+- Deleting an application with domains attached is unguarded because
+  `application.delete` does not exist yet. It must block or release the domains
+  when that endpoint lands, or it will orphan routes.
+
+---
+
 ## Phase 6 — Operations
 
 **`Airside.Data`** — `MetricRollup`, `Notification`, `UpdateRecord`; migration
