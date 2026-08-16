@@ -63,6 +63,8 @@ internal sealed class DatabaseWorkloadStore(
             DisplayName = database.DisplayName,
             Engine = database.Engine,
             Version = database.Version,
+            Variant = database.ImageVariant,
+            CustomImage = database.UsesCustomImage ? database.ImageRef : null,
             CpuNanos = database.CpuLimitNanos,
             MemoryBytes = database.MemoryLimitBytes,
             StorageBytes = database.StorageAllocationBytes,
@@ -87,7 +89,8 @@ internal sealed class DatabaseWorkloadStore(
             database.ContainerId,
             AirsideNames.Volume(slug, "data"),
             AirsideNames.DatabaseNetwork(slug),
-            AirsideNames.DatabaseContainer(slug));
+            AirsideNames.DatabaseContainer(slug),
+            database.ImageDigest);
     }
 
     public async Task SetStateAsync(Guid workloadId, string state, CancellationToken ct)

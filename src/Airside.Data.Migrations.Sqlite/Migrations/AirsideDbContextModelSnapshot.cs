@@ -1155,6 +1155,11 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ImageVariant")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("MaxMemoryBytes")
                         .HasColumnType("INTEGER");
 
@@ -1167,6 +1172,9 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("PublishedPort")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("UsesCustomImage")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Version")

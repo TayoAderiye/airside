@@ -18,7 +18,7 @@ internal abstract class DatabaseEngineBase(IContainerRuntime runtime) : IDatabas
 
     public abstract IReadOnlyList<string> SupportedVersions { get; }
 
-    public abstract ImageReference ResolveImage(string version);
+    public abstract ImageReference ResolveImage(string version, ImageVariant variant);
 
     public abstract ContainerSpec BuildContainerSpec(DatabaseProvisionSpec spec, ProvisionContext context);
 
@@ -50,6 +50,17 @@ internal abstract class DatabaseEngineBase(IContainerRuntime runtime) : IDatabas
                 "version",
                 $"{Kind} {spec.Version} is not a supported version.",
                 supported: SupportedVersions);
+        }
+
+        if (spec.Variant is { } variant && !Capabilities.SupportedVariants.Contains(variant))
+        {
+            return NotApplicable(
+                ErrorCodes.ValidationFieldNotApplicable,
+                "imageVariant",
+                Capabilities.SupportedVariants.Count == 1
+                    ? $"{Kind} publishes only a {Capabilities.SupportedVariants[0]}-based image."
+                    : $"{Kind} does not publish a {variant}-based image.",
+                supported: [.. Capabilities.SupportedVariants.Select(v => v.ToString().ToLowerInvariant())]);
         }
 
         if (Capabilities.SupportsDatabaseName && string.IsNullOrWhiteSpace(spec.DatabaseName))
@@ -230,11 +241,16 @@ internal sealed class PostgresEngine(IContainerRuntime runtime) : DatabaseEngine
         QueryDialect = QueryDialect.Sql,
         DefaultPort = 5432,
         DefaultEnvKeyPrefix = "DATABASE",
+        SupportedVariants = [ImageVariant.Alpine, ImageVariant.Debian],
+        DefaultVariant = ImageVariant.Alpine,
     };
 
     public override IReadOnlyList<string> SupportedVersions { get; } = ["17", "16", "15"];
 
-    public override ImageReference ResolveImage(string version) => new("postgres", $"{version}-alpine");
+    public override ImageReference ResolveImage(string version, ImageVariant variant) => new(
+        "postgres",
+        // The Debian image is the unsuffixed tag; Alpine carries the suffix.
+        variant == ImageVariant.Alpine ? $"{version}-alpine" : version);
 
     public override ContainerSpec BuildContainerSpec(DatabaseProvisionSpec spec, ProvisionContext context)
     {
@@ -244,7 +260,7 @@ internal sealed class PostgresEngine(IContainerRuntime runtime) : DatabaseEngine
         return new ContainerSpec
         {
             Name = context.ContainerName,
-            Image = ResolveImage(spec.Version),
+            Image = ResolveImage(spec.Version, spec.Variant ?? Capabilities.DefaultVariant),
             Labels = context.Labels,
             Limits = new ContainerLimits(spec.MemoryBytes, spec.CpuNanos),
             NetworkName = context.NetworkName,
@@ -387,11 +403,16 @@ internal sealed class MySqlEngine(IContainerRuntime runtime) : DatabaseEngineBas
         QueryDialect = QueryDialect.Sql,
         DefaultPort = 3306,
         DefaultEnvKeyPrefix = "DATABASE",
+
+        // Upstream discontinued the Alpine variant. Offering it would resolve to
+        // a tag that does not exist and fail at pull time.
+        SupportedVariants = [ImageVariant.Debian],
+        DefaultVariant = ImageVariant.Debian,
     };
 
     public override IReadOnlyList<string> SupportedVersions { get; } = ["8.4", "8.0"];
 
-    public override ImageReference ResolveImage(string version) => new("mysql", version);
+    public override ImageReference ResolveImage(string version, ImageVariant variant) => new("mysql", version);
 
     public override ContainerSpec BuildContainerSpec(DatabaseProvisionSpec spec, ProvisionContext context)
     {
@@ -401,7 +422,7 @@ internal sealed class MySqlEngine(IContainerRuntime runtime) : DatabaseEngineBas
         return new ContainerSpec
         {
             Name = context.ContainerName,
-            Image = ResolveImage(spec.Version),
+            Image = ResolveImage(spec.Version, spec.Variant ?? Capabilities.DefaultVariant),
             Labels = context.Labels,
             Limits = new ContainerLimits(spec.MemoryBytes, spec.CpuNanos),
             NetworkName = context.NetworkName,
@@ -537,11 +558,15 @@ internal sealed class MongoDbEngine(IContainerRuntime runtime) : DatabaseEngineB
         QueryDialect = QueryDialect.MongoShell,
         DefaultPort = 27017,
         DefaultEnvKeyPrefix = "MONGO",
+
+        // MongoDB publishes no Alpine image at all.
+        SupportedVariants = [ImageVariant.Debian],
+        DefaultVariant = ImageVariant.Debian,
     };
 
     public override IReadOnlyList<string> SupportedVersions { get; } = ["8.0", "7.0"];
 
-    public override ImageReference ResolveImage(string version) => new("mongo", version);
+    public override ImageReference ResolveImage(string version, ImageVariant variant) => new("mongo", version);
 
     public override ContainerSpec BuildContainerSpec(DatabaseProvisionSpec spec, ProvisionContext context)
     {
@@ -551,7 +576,7 @@ internal sealed class MongoDbEngine(IContainerRuntime runtime) : DatabaseEngineB
         return new ContainerSpec
         {
             Name = context.ContainerName,
-            Image = ResolveImage(spec.Version),
+            Image = ResolveImage(spec.Version, spec.Variant ?? Capabilities.DefaultVariant),
             Labels = context.Labels,
             Limits = new ContainerLimits(spec.MemoryBytes, spec.CpuNanos),
             NetworkName = context.NetworkName,

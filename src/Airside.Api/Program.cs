@@ -178,6 +178,8 @@ await using (var scope = app.Services.CreateAsyncScope())
     var seeder = scope.ServiceProvider.GetRequiredService<DbSeeder>();
     await seeder.SeedAsync(storeOptions.Provider, CancellationToken.None).ConfigureAwait(false);
 
+    AirsideBanner.Write(BuildInfo.Version, storeOptions.Provider.ToString().ToLowerInvariant());
+
     await SetupTokenPrinter.EnsureAsync(scope.ServiceProvider, CancellationToken.None).ConfigureAwait(false);
 }
 

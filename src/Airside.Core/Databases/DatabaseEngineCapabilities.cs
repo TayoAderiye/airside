@@ -8,6 +8,16 @@ public enum DatabaseEngineKind
     Redis,
 }
 
+/// <summary>The base image an engine's tag is built on.</summary>
+public enum ImageVariant
+{
+    /// <summary>musl libc, BusyBox userland, markedly smaller image.</summary>
+    Alpine,
+
+    /// <summary>glibc and the standard Debian userland. Larger, broader extension availability.</summary>
+    Debian,
+}
+
 public enum QueryDialect
 {
     Sql,
@@ -74,4 +84,26 @@ public sealed record DatabaseEngineCapabilities
     /// what an engine says about itself.
     /// </summary>
     public IReadOnlyList<string>? EvictionPolicies { get; init; }
+
+    /// <summary>
+    /// The base images this engine actually publishes.
+    /// </summary>
+    /// <remarks>
+    /// Per-engine rather than a shared list, because upstream availability
+    /// differs: MongoDB publishes no Alpine image at all and MySQL discontinued
+    /// theirs. An engine offering one variant has a single entry here, and the
+    /// UI renders no control for it.
+    /// </remarks>
+    public required IReadOnlyList<ImageVariant> SupportedVariants { get; init; }
+
+    /// <summary>
+    /// The variant used when the caller does not choose one.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a property of the engine and not a global constant. A shared
+    /// default of Alpine would leak into MySQL and MongoDB, whose resolvers must
+    /// emit an unsuffixed Debian tag — and the failure would be an image pull
+    /// that 404s at provision time, long after the mistake was made.
+    /// </remarks>
+    public required ImageVariant DefaultVariant { get; init; }
 }

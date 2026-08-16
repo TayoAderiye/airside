@@ -85,10 +85,39 @@ internal static class DatabaseEndpoints
                     + e.Capabilities.QueryDialect.ToString()[1..],
                 e.Capabilities.DefaultEnvKeyPrefix),
             e.Capabilities.EvictionPolicies,
-            InjectedKeysFor(e))).ToList();
+            InjectedKeysFor(e),
+            VariantsFor(e))).ToList();
 
         return TypedResults.Ok<IReadOnlyList<DatabaseEngineDto>>(catalogue);
     }
+
+    /// <summary>
+    /// The variant choices for an engine, with guidance only where it is warranted.
+    /// </summary>
+    /// <remarks>
+    /// The note hangs off the non-default option. Airside defaults to Alpine where
+    /// upstream publishes one, so the thing worth saying is what picking Debian
+    /// buys and costs — not a warning on the path almost everyone takes.
+    /// </remarks>
+    private static IReadOnlyList<ImageVariantDto> VariantsFor(IDatabaseEngine engine) =>
+    [
+        .. engine.Capabilities.SupportedVariants.Select(v => new ImageVariantDto(
+            v.ToString().ToLowerInvariant(),
+            v == ImageVariant.Alpine ? "Alpine" : "Debian",
+            v == engine.Capabilities.DefaultVariant,
+            v == engine.Capabilities.DefaultVariant ? null : NoteFor(v))),
+    ];
+
+    private static string? NoteFor(ImageVariant variant) => variant switch
+    {
+        ImageVariant.Debian =>
+            "Larger image, but broader extension availability and standard glibc tooling. "
+            + "The variant cannot be changed after the database is created.",
+        ImageVariant.Alpine =>
+            "Smaller image built on musl libc with a BusyBox userland. "
+            + "The variant cannot be changed after the database is created.",
+        _ => null,
+    };
 
     private static string DisplayNameFor(DatabaseEngineKind kind) => kind switch
     {

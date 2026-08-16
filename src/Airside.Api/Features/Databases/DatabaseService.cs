@@ -55,7 +55,7 @@ public sealed class AllocationGate : IDisposable
     }
 }
 
-internal sealed class DatabaseService(
+public sealed class DatabaseService(
     AirsideDbContext db,
     IDatabaseEngineRegistry engines,
     IAllocationPolicy allocationPolicy,
@@ -94,6 +94,38 @@ internal sealed class DatabaseService(
         }
 
         var engine = engines.Get(engineKind);
+
+        ImageVariant? variant = null;
+
+        if (!string.IsNullOrWhiteSpace(request.ImageVariant))
+        {
+            if (!Enum.TryParse<ImageVariant>(request.ImageVariant, ignoreCase: true, out var parsed))
+            {
+                return new Error(
+                    ErrorCodes.ValidationFailed,
+                    $"'{request.ImageVariant}' is not a known image variant.",
+                    new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["field"] = "imageVariant",
+                        ["supported"] = engine.Capabilities.SupportedVariants
+                            .Select(v => v.ToString().ToLowerInvariant()).ToList(),
+                    });
+            }
+
+            variant = parsed;
+        }
+
+        // A custom image bypasses variant resolution entirely, so asking for both
+        // is a contradiction rather than a preference.
+        if (!string.IsNullOrWhiteSpace(request.CustomImage) && variant is not null)
+        {
+            return new Error(
+                ErrorCodes.ValidationFieldNotApplicable,
+                "A custom image and an image variant cannot both be set: a custom image is used exactly "
+                + "as given.",
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["field"] = "imageVariant" });
+        }
+
         var password = request.Password is null ? generator.GeneratePassword() : new Secret(request.Password);
         var workloadId = Guid.CreateVersion7();
 
@@ -104,6 +136,8 @@ internal sealed class DatabaseService(
             DisplayName = string.IsNullOrWhiteSpace(request.DisplayName) ? slug.Value : request.DisplayName,
             Engine = engineKind,
             Version = request.Version,
+            Variant = variant,
+            CustomImage = request.CustomImage,
             CpuNanos = request.CpuNanos,
             MemoryBytes = request.MemoryBytes,
             StorageBytes = request.StorageBytes,
@@ -174,7 +208,11 @@ internal sealed class DatabaseService(
                 CreatedByUserId = userId,
                 Engine = engineKind,
                 Version = spec.Version,
-                ImageRef = engine.ResolveImage(spec.Version).ToString(),
+                ImageVariant = spec.Variant ?? engine.Capabilities.DefaultVariant,
+                UsesCustomImage = !string.IsNullOrWhiteSpace(spec.CustomImage),
+                ImageRef = string.IsNullOrWhiteSpace(spec.CustomImage)
+                    ? engine.ResolveImage(spec.Version, spec.Variant ?? engine.Capabilities.DefaultVariant).ToString()
+                    : spec.CustomImage,
                 DatabaseName = spec.DatabaseName,
                 PublishedPort = spec.PublishedPort,
                 PublishBindAddress = spec.PublishBindAddress,
@@ -340,6 +378,36 @@ internal sealed class DatabaseService(
 
             return (Result<JobAccepted>)JobAccepted.From(jobId, DatabaseJobTypes.Resize, id);
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rejects any attempt to change a provisioned workload's image variant.
+    /// </summary>
+    /// <remarks>
+    /// No endpoint currently mutates it, and this exists so that none can be added
+    /// without meeting the rule. The database context enforces the same thing as a
+    /// backstop; this is the half that produces an error a user can act on.
+    /// </remarks>
+    public static Result RejectVariantChange(DatabaseInstance existing, ImageVariant? requested)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+
+        if (requested is null || requested == existing.ImageVariant)
+        {
+            return Result.Ok();
+        }
+
+        return new Error(
+            ErrorCodes.ValidationFieldNotApplicable,
+            "The image variant is fixed when a database is created. Alpine and Debian builds differ in "
+            + "libc and in the layout the engine initialises, so an existing data volume cannot simply be "
+            + "pointed at the other one. Create a new database on the wanted variant and restore into it.",
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["field"] = "imageVariant",
+                ["current"] = existing.ImageVariant.ToString().ToLowerInvariant(),
+                ["requested"] = requested.Value.ToString().ToLowerInvariant(),
+            });
     }
 
     /// <summary>Warnings that are true of a configuration but do not stop it being accepted.</summary>

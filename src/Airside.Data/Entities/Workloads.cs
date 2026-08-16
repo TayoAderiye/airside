@@ -85,6 +85,29 @@ public class DatabaseInstance : Workload
     public string ImageRef { get; set; } = string.Empty;
 
     /// <summary>
+    /// The base image this workload was created on.
+    /// </summary>
+    /// <remarks>
+    /// Immutable after provisioning. Alpine and Debian builds differ in libc and
+    /// in the on-disk layout an engine initialises, so switching one under an
+    /// existing data volume is not a configuration change — it is a migration
+    /// nobody asked for. Enforced at the service layer and again in
+    /// <c>SaveChanges</c>.
+    /// </remarks>
+    public ImageVariant ImageVariant { get; set; }
+
+    /// <summary>
+    /// True when an explicit image was supplied instead of a resolved variant.
+    /// </summary>
+    /// <remarks>
+    /// Airside cannot reason about what is inside a custom image, so variant
+    /// guidance, version support, and upgrade advice all stop applying. Recording
+    /// it means the UI can say so rather than showing guidance that is quietly
+    /// untrue.
+    /// </remarks>
+    public bool UsesCustomImage { get; set; }
+
+    /// <summary>
     /// Pinned at provision. A tag moves: <c>postgres:16</c> six months later is a
     /// different build, and a restart landing on it is how a database comes back
     /// refusing to start.

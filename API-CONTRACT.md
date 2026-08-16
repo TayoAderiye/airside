@@ -417,8 +417,44 @@ DatabaseEngineDto = {
   }
   maxMemoryPolicies?: string[]       // Redis only
   injectedEnvKeys: string[]          // e.g. ["_HOST","_PORT","_PASSWORD","_URL"]
+  variants: {
+    value: "alpine" | "debian"
+    displayName: string
+    isDefault: boolean
+    note: string | null              // present only on the non-default option
+  }[]
 }
 ```
+
+### Image variants
+
+| Engine | Variants | Default |
+|---|---|---|
+| PostgreSQL | `alpine`, `debian` | **`alpine`** |
+| Redis | `alpine`, `debian` | **`alpine`** |
+| MySQL | `debian` only | `debian` |
+| MongoDB | `debian` only | `debian` |
+
+**A single entry means the UI renders no variant control at all.** MySQL
+discontinued its Alpine images upstream and MongoDB never published one, so there
+is no choice to present — and offering one would resolve to a tag that does not
+exist.
+
+**`note` is null on the default, and that is deliberate.** A warning attached to
+the path most users take is noise, and it teaches people that these messages can
+be dismissed unread — exactly the habit you do not want when a real one appears.
+Since Alpine is the default, the note lives on the Debian option and explains
+what it buys (broader extension availability, standard glibc tooling) and what it
+costs (a larger image), along with the fact that the variant is fixed at creation.
+
+`imageVariant` on `CreateDatabaseRequest` is optional; omitting it takes the
+engine's own default. It is **fixed once the database exists** — Alpine and Debian
+differ in libc and in the layout an engine initialises into its volume, so
+changing it is a migration rather than a setting. Any attempt returns
+`400 validation.field_not_applicable` with `current` and `requested` in metadata.
+
+`customImage` bypasses variant resolution entirely and sets `usesCustomImage` on
+the workload; supplying both is rejected. See `docs/image-variants.md`.
 
 > **This endpoint is load-bearing for the UI.** The provisioning form must be
 > rendered from these capabilities, not from hardcoded engine knowledge. When

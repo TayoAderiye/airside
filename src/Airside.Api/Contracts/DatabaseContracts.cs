@@ -12,6 +12,21 @@ public sealed record DatabaseCapabilitiesDto(
     string QueryDialect,
     string DefaultEnvKeyPrefix);
 
+/// <param name="Note">
+/// Inline guidance for this choice, or null when there is nothing worth saying.
+/// </param>
+/// <remarks>
+/// The note is deliberately absent on the default. A warning attached to the
+/// path most users take is noise, and it teaches them that these messages can be
+/// dismissed without reading — which is exactly the habit you do not want when a
+/// real one appears.
+/// </remarks>
+public sealed record ImageVariantDto(string Value, string DisplayName, bool IsDefault, string? Note);
+
+/// <param name="Variants">
+/// What the engine actually publishes. A single entry means the UI renders no
+/// control at all — there is no choice to present.
+/// </param>
 public sealed record DatabaseEngineDto(
     string Kind,
     string DisplayName,
@@ -20,7 +35,8 @@ public sealed record DatabaseEngineDto(
     int DefaultPort,
     DatabaseCapabilitiesDto Capabilities,
     IReadOnlyList<string>? MaxMemoryPolicies,
-    IReadOnlyList<string> InjectedEnvKeys);
+    IReadOnlyList<string> InjectedEnvKeys,
+    IReadOnlyList<ImageVariantDto> Variants);
 
 public sealed record CreateDatabaseRequest
 {
@@ -31,6 +47,26 @@ public sealed record CreateDatabaseRequest
     public required string Engine { get; init; }
 
     public required string Version { get; init; }
+
+    /// <summary>
+    /// <c>alpine</c> or <c>debian</c>. Omit to take the engine's own default.
+    /// </summary>
+    /// <remarks>
+    /// Fixed once the database exists. Rejected outright for an engine that does
+    /// not publish the variant, and rejected alongside <c>customImage</c>, which
+    /// bypasses variant resolution entirely.
+    /// </remarks>
+    public string? ImageVariant { get; init; }
+
+    /// <summary>
+    /// An explicit image, used exactly as given.
+    /// </summary>
+    /// <remarks>
+    /// The way to run a Postgres carrying pgvector or PostGIS. Airside cannot
+    /// reason about the contents, so the workload is flagged
+    /// <c>usesCustomImage</c> and variant and version guidance stop applying.
+    /// </remarks>
+    public string? CustomImage { get; init; }
 
     public required long CpuNanos { get; init; }
 
@@ -132,6 +168,8 @@ public sealed record DatabaseDetailDto(
     DatabaseSummaryDto Summary,
     string ImageRef,
     string? ImageDigest,
+    string ImageVariant,
+    bool UsesCustomImage,
     string? DatabaseName,
     int? PublishedPort,
     string? PublishBindAddress,
@@ -150,6 +188,8 @@ public sealed record DatabaseDetailDto(
             DatabaseSummaryDto.From(d),
             d.ImageRef,
             d.ImageDigest,
+            d.ImageVariant.ToString().ToLowerInvariant(),
+            d.UsesCustomImage,
             // Null for Redis. Not an empty string — the field genuinely does not
             // apply, and the UI reads capabilities to know that.
             d.DatabaseName,

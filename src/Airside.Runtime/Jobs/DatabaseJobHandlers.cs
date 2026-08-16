@@ -54,6 +54,12 @@ public interface IDatabaseWorkloadStore
 }
 
 /// <summary>A workload flattened into what a handler needs, with the password already decrypted.</summary>
+/// <param name="ImageDigest">
+/// The digest recorded at provision. Once set, every later resolution goes
+/// through it rather than the tag — a tag moves, and a re-provision landing on a
+/// different build than the one the data was created under is how a database
+/// comes back refusing to start.
+/// </param>
 public sealed record DatabaseWorkloadSnapshot(
     Guid Id,
     Slug Slug,
@@ -63,7 +69,8 @@ public sealed record DatabaseWorkloadSnapshot(
     string? ContainerId,
     string DataVolumeName,
     string NetworkName,
-    string ContainerName);
+    string ContainerName,
+    string? ImageDigest = null);
 
 /// <summary>
 /// Creates a database: network, volume, container, start, wait for health.
@@ -108,7 +115,7 @@ public sealed class DatabaseProvisionHandler(
 
         await context.ReportProgressAsync(5, "Pulling image", ct).ConfigureAwait(false);
 
-        var image = engine.ResolveImage(workload.Spec.Version);
+        var image = ResolveImage(workload, engine);
         var pulled = await runtime.Images
             .PullAsync(image, new Progress<string>(_ => { }), ct)
             .ConfigureAwait(false);
@@ -148,6 +155,33 @@ public sealed class DatabaseProvisionHandler(
 
         await context.ReportProgressAsync(100, "Running", ct).ConfigureAwait(false);
         return Result.Ok();
+    }
+
+    /// <summary>
+    /// Decides which image this provision pulls.
+    /// </summary>
+    /// <remarks>
+    /// The order matters. An already-recorded digest wins over everything,
+    /// because a re-run of a provision must land on the same build the volume was
+    /// initialised by. A custom image bypasses variant resolution entirely —
+    /// Airside cannot reason about what is inside it. Only then does the engine
+    /// resolve a tag from version and variant.
+    /// </remarks>
+    private static ImageReference ResolveImage(DatabaseWorkloadSnapshot workload, IDatabaseEngine engine)
+    {
+        if (!string.IsNullOrEmpty(workload.ImageDigest))
+        {
+            return ImageReference.Parse(workload.ImageDigest);
+        }
+
+        if (!string.IsNullOrWhiteSpace(workload.Spec.CustomImage))
+        {
+            return ImageReference.Parse(workload.Spec.CustomImage);
+        }
+
+        return engine.ResolveImage(
+            workload.Spec.Version,
+            workload.Spec.Variant ?? engine.Capabilities.DefaultVariant);
     }
 
     private async Task<NetworkSummary> EnsureNetworkAsync(

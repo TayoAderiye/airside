@@ -15,6 +15,20 @@ public sealed record DatabaseProvisionSpec
 
     public required string Version { get; init; }
 
+    /// <summary>Null means the engine's own default — never a shared constant.</summary>
+    public ImageVariant? Variant { get; init; }
+
+    /// <summary>
+    /// An explicit image, which bypasses variant resolution entirely.
+    /// </summary>
+    /// <remarks>
+    /// The escape hatch for an image Airside does not publish a variant for — a
+    /// Postgres build carrying pgvector or PostGIS, for instance. Airside cannot
+    /// reason about what is inside it, so the workload is flagged
+    /// <c>UsesCustomImage</c> and variant guidance stops applying.
+    /// </remarks>
+    public string? CustomImage { get; init; }
+
     public required long CpuNanos { get; init; }
 
     public required long MemoryBytes { get; init; }

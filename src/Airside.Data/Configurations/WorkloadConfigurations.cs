@@ -55,6 +55,7 @@ public class DatabaseInstanceConfiguration : IEntityTypeConfiguration<DatabaseIn
         builder.Property(x => x.Engine).HasConversion<string>().HasMaxLength(32);
         builder.Property(x => x.Version).HasMaxLength(32);
         builder.Property(x => x.ImageRef).HasMaxLength(256);
+        builder.Property(x => x.ImageVariant).HasConversion<string>().HasMaxLength(16);
         builder.Property(x => x.ImageDigest).HasMaxLength(128);
         builder.Property(x => x.DatabaseName).HasMaxLength(64);
         builder.Property(x => x.PublishBindAddress).HasMaxLength(64);

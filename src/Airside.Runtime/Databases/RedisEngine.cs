@@ -53,11 +53,15 @@ internal sealed class RedisEngine(IContainerRuntime runtime) : DatabaseEngineBas
         DefaultPort = 6379,
         DefaultEnvKeyPrefix = "REDIS",
         EvictionPolicies = MaxMemoryPolicies,
+        SupportedVariants = [ImageVariant.Alpine, ImageVariant.Debian],
+        DefaultVariant = ImageVariant.Alpine,
     };
 
     public override IReadOnlyList<string> SupportedVersions { get; } = ["7.4", "7.2"];
 
-    public override ImageReference ResolveImage(string version) => new("redis", $"{version}-alpine");
+    public override ImageReference ResolveImage(string version, ImageVariant variant) => new(
+        "redis",
+        variant == ImageVariant.Alpine ? $"{version}-alpine" : version);
 
     public override Result Validate(DatabaseProvisionSpec spec)
     {
@@ -161,7 +165,7 @@ internal sealed class RedisEngine(IContainerRuntime runtime) : DatabaseEngineBas
         return new ContainerSpec
         {
             Name = context.ContainerName,
-            Image = ResolveImage(spec.Version),
+            Image = ResolveImage(spec.Version, spec.Variant ?? Capabilities.DefaultVariant),
             Labels = context.Labels,
             Command = command,
             Limits = new ContainerLimits(spec.MemoryBytes, spec.CpuNanos),

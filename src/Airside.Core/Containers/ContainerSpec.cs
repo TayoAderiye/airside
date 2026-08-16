@@ -168,4 +168,34 @@ public sealed record ImageReference(string Repository, string Tag, string? Diges
 {
     public override string ToString() =>
         Digest is null ? $"{Repository}:{Tag}" : $"{Repository}@{Digest}";
+
+    /// <summary>
+    /// Parses an image reference, including the <c>repo@sha256:…</c> form Docker
+    /// reports in <c>RepoDigests</c>.
+    /// </summary>
+    /// <remarks>
+    /// Used to turn a recorded digest back into something pullable, which is how
+    /// a re-provision resolves the exact image the workload started on rather
+    /// than whatever the tag points at today.
+    /// </remarks>
+    public static ImageReference Parse(string reference)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reference);
+
+        var atSign = reference.IndexOf('@', StringComparison.Ordinal);
+
+        if (atSign > 0)
+        {
+            return new ImageReference(reference[..atSign], string.Empty, reference[(atSign + 1)..]);
+        }
+
+        // Only split on a colon after the last slash: a registry host may carry a
+        // port, as in registry.example.com:5000/team/image.
+        var lastSlash = reference.LastIndexOf('/');
+        var colon = reference.LastIndexOf(':');
+
+        return colon > lastSlash
+            ? new ImageReference(reference[..colon], reference[(colon + 1)..])
+            : new ImageReference(reference, "latest");
+    }
 }

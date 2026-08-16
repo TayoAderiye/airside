@@ -117,6 +117,7 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
         foreach (var entry in ChangeTracker.Entries())
         {
             RejectAuditMutation(entry);
+            RejectImageVariantChange(entry);
 
             if (entry.Entity is not Entity entity)
             {
@@ -137,6 +138,34 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
                     break;
                 default:
                     break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Backstop for image-variant immutability.
+    /// </summary>
+    /// <remarks>
+    /// The service layer rejects this with a proper error; this is the guard that
+    /// still holds if a future endpoint forgets to ask. Alpine and Debian builds
+    /// differ in libc and in the layout an engine initialises into its volume, so
+    /// flipping the variant of a provisioned database points a different build at
+    /// data it did not create.
+    /// </remarks>
+    private static void RejectImageVariantChange(EntityEntry entry)
+    {
+        if (entry.Entity is not DatabaseInstance || entry.State != EntityState.Modified)
+        {
+            return;
+        }
+
+        foreach (var property in new[] { nameof(DatabaseInstance.ImageVariant), nameof(DatabaseInstance.UsesCustomImage) })
+        {
+            if (entry.Property(property).IsModified)
+            {
+                throw new InvalidOperationException(
+                    $"{property} is fixed at provisioning and cannot be changed. Create a new database "
+                    + "on the wanted variant and restore into it.");
             }
         }
     }

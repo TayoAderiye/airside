@@ -19,8 +19,15 @@ public interface IDatabaseEngine
     /// <summary>Versions Airside will provision, newest first.</summary>
     IReadOnlyList<string> SupportedVersions { get; }
 
-    /// <summary>Resolves a version to an image. Digest pinning happens at provision time.</summary>
-    ImageReference ResolveImage(string version);
+    /// <summary>
+    /// Resolves a version and variant to an image tag.
+    /// </summary>
+    /// <remarks>
+    /// Never consulted when the caller supplied a custom image: that bypasses
+    /// variant resolution entirely. Digest pinning happens at provision time, and
+    /// everything afterwards resolves by digest rather than by this tag.
+    /// </remarks>
+    ImageReference ResolveImage(string version, ImageVariant variant);
 
     /// <summary>Rejects engine-inapplicable fields — a database name for Redis, a missing maxmemory.</summary>
     Result Validate(DatabaseProvisionSpec spec);
