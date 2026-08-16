@@ -144,6 +144,7 @@ internal static class DatabaseEndpoints
 
     private static async Task<Ok<PagedResult<DatabaseSummaryDto>>> ListAsync(
         AirsideDbContext db,
+        SystemWorkloadReader system,
         CancellationToken ct,
         int page = 1,
         int pageSize = 25)
@@ -160,8 +161,17 @@ internal static class DatabaseEndpoints
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // The control-plane store, on the first page only. Absent entirely under
+        // the SQLite provider, where there is no database container to find.
+        var systemDatabases = Math.Max(1, page) == 1
+            ? await system.DatabasesAsync(ct).ConfigureAwait(false)
+            : [];
+
         return TypedResults.Ok(new PagedResult<DatabaseSummaryDto>(
-            [.. databases.Select(DatabaseSummaryDto.From)], Math.Max(1, page), size, total));
+            [.. systemDatabases, .. databases.Select(DatabaseSummaryDto.From)],
+            Math.Max(1, page),
+            size,
+            total));
     }
 
     private static async Task<Results<Ok<DatabaseDetailDto>, NotFound>> GetAsync(

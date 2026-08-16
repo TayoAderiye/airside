@@ -202,6 +202,11 @@ builder.Services.AddHostedService<JobDispatcherService>();
 builder.Services.AddScoped<IHostAllocationReader, HostAllocationReader>();
 builder.Services.AddSingleton<AllocationGate>();
 builder.Services.AddScoped<DatabaseService>();
+
+// Reads Airside's own containers so they appear beside the workloads it manages.
+// Scoped rather than singleton: it asks Docker for current state, and a cached
+// answer would show a stopped container as running.
+builder.Services.AddScoped<Airside.Api.Features.SystemWorkloadReader>();
 builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
 builder.Services.AddScoped<IBackupStore, BackupStore>();
 builder.Services.AddScoped<ApplicationService>();

@@ -51,20 +51,53 @@ export function DatabasesList() {
         />
       ) : (
         <ul className="flex flex-col gap-3">
-          {rows.map((db) => (
-            <li key={db.id} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 lg:flex-row lg:items-center">
-              <Link href={`/databases/${db.id}`} className="min-w-0 flex-1">
-                <p className="font-medium">{db.displayName || db.slug}</p>
-                <p className="font-mono text-xs text-muted-foreground">
-                  {db.engine} {db.version}
-                </p>
-              </Link>
-              <StatusBadge state={apiState(db.state)} />
-              <Link href={`/query?db=${db.id}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5')}>
-                <SquareTerminal className="size-3.5" /> Query
-              </Link>
-            </li>
-          ))}
+          {rows.map((db) => {
+            // The control-plane store. No detail page, and no query console —
+            // this is the database holding every credential and audit row on the
+            // host, and a console pointed at it is not a feature.
+            if (db.isSystem) {
+              return (
+                <li
+                  key={db.id}
+                  className="flex flex-col gap-3 rounded-lg border border-dashed border-border bg-card/50 p-4 lg:flex-row lg:items-center"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 font-medium">
+                      {db.displayName || db.slug}
+                      <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                        control plane
+                      </span>
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {db.engine} {db.version} · Airside&apos;s own store
+                    </p>
+                  </div>
+                  <StatusBadge state={apiState(db.state)} />
+                </li>
+              )
+            }
+
+            return (
+              <li
+                key={db.id}
+                className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 lg:flex-row lg:items-center"
+              >
+                <Link href={`/databases/${db.id}`} className="min-w-0 flex-1">
+                  <p className="font-medium">{db.displayName || db.slug}</p>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {db.engine} {db.version}
+                  </p>
+                </Link>
+                <StatusBadge state={apiState(db.state)} />
+                <Link
+                  href={`/query?db=${db.id}`}
+                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5')}
+                >
+                  <SquareTerminal className="size-3.5" /> Query
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

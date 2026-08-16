@@ -57,6 +57,7 @@ internal static class ApplicationEndpoints
 
     private static async Task<Ok<PagedResult<ApplicationSummaryDto>>> ListAsync(
         AirsideDbContext db,
+        SystemWorkloadReader system,
         CancellationToken ct,
         int page = 1,
         int pageSize = 25)
@@ -72,8 +73,18 @@ internal static class ApplicationEndpoints
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        // Airside's own containers, on the first page only. They are discovered
+        // rather than queried, so they cannot take part in the paging arithmetic
+        // without either lying about the total or reading Docker once per page.
+        var systemApps = Math.Max(1, page) == 1
+            ? await system.ApplicationsAsync(ct).ConfigureAwait(false)
+            : [];
+
         return TypedResults.Ok(new PagedResult<ApplicationSummaryDto>(
-            [.. apps.Select(ApplicationSummaryDto.From)], Math.Max(1, page), size, total));
+            [.. systemApps, .. apps.Select(ApplicationSummaryDto.From)],
+            Math.Max(1, page),
+            size,
+            total));
     }
 
     private static async Task<Results<Ok<ApplicationSummaryDto>, NotFound>> GetAsync(
