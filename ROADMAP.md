@@ -718,6 +718,43 @@ screen and asking why it would not do the obvious thing.
 
 ---
 
+## A proxy log full of red — **done**
+
+Reported as a question — *"whys proxy showing red?"* — with a screenshot of
+Caddy's log. Three separate causes, and only one of them a defect.
+
+**Airside asked Caddy to delete a route that was already gone, every two
+minutes, forever.** Once a dashboard domain exists, reconciliation calls
+`RemoveFallbackRouteAsync` unconditionally on every pass. The first call
+succeeds; every subsequent one gets `unknown object ID 'airside-route-fallback'`
+— a 404 that Caddy logs at `error` level. About seven hundred error lines a day,
+each reporting that something Airside wanted gone was already gone, which is the
+desired state.
+
+Nothing broke, which is exactly why it survived: the only damage is that the
+operator learns the proxy log is always red, and stops reading it. The presence
+of the route is now checked against the routes array first — not with
+`GET /id/…`, which 404s and logs identically, trading one spurious error for
+another. An unreadable configuration still attempts the delete, because failing
+to read is not evidence of absence and a fallback left in place serves the
+dashboard on every hostname pointed at the host.
+
+**The `context canceled` lines are normal.** Caddy logs a client disconnect on a
+streaming response at `error` level. Every time the Monitoring screen switches
+workloads, the browser closes an `EventSource` and Caddy records an error. Live
+logs made this visible; they did not make it wrong.
+
+**The 502s coincided with an upgrade.** A one-millisecond failure to reach
+`airside-api:8080` is the API container being replaced. Not investigated further,
+and not claimed to be understood.
+
+Worth recording: two of the three were **the log being honest about things that
+did not matter**, and the fix for those is to stop generating them, not to
+recolour them. The severity heuristic added alongside live logs was working
+correctly here — Caddy really did log these at `error`.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

@@ -167,17 +167,66 @@ public sealed class CaddyProxyManager(
             "Installed the fallback route; the dashboard answers on any hostname until a dashboard domain is set");
     }
 
+    /// <summary>
+    /// Withdraws the catch-all route, if it is still there.
+    /// </summary>
+    /// <remarks>
+    /// The presence check is not an optimisation. Reconciliation calls this every
+    /// two minutes for the life of an instance that has a dashboard domain, and
+    /// Caddy answers a delete for an absent <c>@id</c> with a 404 that it logs at
+    /// <c>error</c> level. Deleting unconditionally therefore wrote roughly seven
+    /// hundred error lines a day into the proxy log, all of them saying that
+    /// something Airside wanted gone was already gone — which is the desired
+    /// state. The cost is a reader who learns to skim past errors in the one log
+    /// where a real one matters.
+    /// </remarks>
     public async Task RemoveFallbackRouteAsync(CancellationToken ct)
     {
+        if (!await FallbackRouteExistsAsync(ct).ConfigureAwait(false))
+        {
+            return;
+        }
+
         using var response = await http
             .DeleteAsync(new Uri($"/id/{FallbackRouteId}", UriKind.Relative), ct)
             .ConfigureAwait(false);
 
-        // A missing fallback is the desired end state, so a 404 is a success.
+        // Still tolerated: another pass, or an operator with curl, can remove it
+        // between the check above and this call. A missing fallback is the end
+        // state either way.
         if (response.IsSuccessStatusCode)
         {
             logger.LogInformation("Withdrew the fallback route");
         }
+    }
+
+    /// <summary>
+    /// Whether the catch-all route is present, read from the routes array.
+    /// </summary>
+    /// <remarks>
+    /// Read from the whole array rather than with <c>GET /id/…</c>, because that
+    /// also 404s when absent and Caddy logs that at error level too — which
+    /// would trade one spurious error line for another.
+    /// </remarks>
+    private async Task<bool> FallbackRouteExistsAsync(CancellationToken ct)
+    {
+        using var response = await http
+            .GetAsync(new Uri($"/config/apps/http/servers/{_options.ServerName}/routes", UriKind.Relative), ct)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            // Unreadable configuration is not evidence of absence. Falling
+            // through to the delete keeps the withdrawal reliable, which matters
+            // more than the log line it might cost.
+            return true;
+        }
+
+        var routes = await response.Content
+            .ReadFromJsonAsync<List<CaddyRoute>>(Json, ct)
+            .ConfigureAwait(false) ?? [];
+
+        return routes.Exists(r => string.Equals(r.Id, FallbackRouteId, StringComparison.Ordinal));
     }
 
     public Task SwapUpstreamAsync(string hostname, UpstreamTarget upstream, CancellationToken ct) =>
