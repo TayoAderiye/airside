@@ -55,12 +55,21 @@ public sealed class HostAllocationReader(
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var storage = await db.Volumes
+        var volumes = await db.Volumes
             .AsNoTracking()
-            .SumAsync(v => v.SizeAllocationBytes, ct)
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Allocated = g.Sum(v => v.SizeAllocationBytes),
+                Measured = g.Sum(v => v.LastMeasuredBytes ?? 0L),
+            })
+            .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
-        var allocated = new ResourceTriple(workloads?.Cpu ?? 0, workloads?.Memory ?? 0, storage);
+        var allocated = new ResourceTriple(
+            workloads?.Cpu ?? 0,
+            workloads?.Memory ?? 0,
+            volumes?.Allocated ?? 0);
 
         ResourceTriple? used = null;
 
@@ -74,7 +83,51 @@ public sealed class HostAllocationReader(
             // "not sampled", which the UI shows as an em dash rather than zero.
         }
 
-        return new ResourcePosition(capacity, reserve, allocated, used, host.StorageEnforcement);
+        return new ResourcePosition(
+            capacity,
+            reserve with { StorageBytes = StorageReserve(reserve, used, volumes?.Measured ?? 0) },
+            allocated,
+            used,
+            host.StorageEnforcement);
+    }
+
+    /// <summary>
+    /// The storage reserve, widened by disk Airside did not hand out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Capacity is the whole filesystem, and the admission gate subtracts only
+    /// the reserve and Airside's own allocations from it. Nothing accounted for
+    /// the operating system and the container images, which on a fresh 8 GiB
+    /// cloud instance are already 3.7 GiB. The gate believed it had 4.7 GiB to
+    /// give out on a disk with 3.0 GiB free, and would have admitted a volume
+    /// that could not fit.
+    /// </para>
+    /// <para>
+    /// Airside's own volumes are subtracted back out, because their bytes appear
+    /// in both numbers — once as filesystem usage and once as an allocation. A
+    /// 20 GiB database volume that is 80% full would otherwise be counted twice
+    /// and cost 16 GiB of apparent headroom.
+    /// </para>
+    /// <para>
+    /// Unmeasured volumes count as empty, which errs toward reserving less. That
+    /// is the wrong direction for safety, but the alternative — assuming a new
+    /// volume is full — would refuse everything immediately after provisioning
+    /// one. The measurement runs on a timer and converges.
+    /// </para>
+    /// </remarks>
+    private static long StorageReserve(HostReserve reserve, ResourceTriple? used, long airsideMeasuredBytes)
+    {
+        if (used is null)
+        {
+            // Not sampled yet. The plain reserve is the honest answer rather
+            // than a guess in either direction.
+            return reserve.StorageBytes;
+        }
+
+        var foreignUsage = Math.Max(0, used.StorageBytes - airsideMeasuredBytes);
+
+        return reserve.StorageBytes + foreignUsage;
     }
 }
 
