@@ -57,7 +57,13 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="border-t border-border px-4 py-3">
-        <p className="font-mono text-[10px] text-muted-foreground">v0.2 · /api/v1</p>
+        {/*
+          The version baked in at build time, not a literal. This read "v0.2"
+          against a 0.1.3 build — a number nothing in the product had ever been.
+        */}
+        <p className="font-mono text-[10px] text-muted-foreground">
+          v{process.env.NEXT_PUBLIC_AIRSIDE_UI_VERSION ?? 'dev'} · /api/v1
+        </p>
       </div>
     </div>
   )
