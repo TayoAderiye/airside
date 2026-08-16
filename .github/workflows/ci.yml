@@ -43,6 +43,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          # Which pnpm to install is read from a "packageManager" field, and this
+          # repository has no package.json at its root — the dashboard is one
+          # part of it, not the whole thing. Without this the action finds
+          # nothing to read and fails before Node is even set up.
+          package_json_file: frontend/package.json
 
       - uses: actions/setup-node@v4
         with:
