@@ -7,7 +7,7 @@ learning Kubernetes and without a monthly bill.
 Airside manages Docker on the host it runs on. It is not a cluster orchestrator,
 and it is not trying to become one.
 
-> **Status: 0.1.6, pre-release.** Complete through the roadmap, heavily tested,
+> **Status: 0.1.7, pre-release.** Complete through the roadmap, heavily tested,
 > and now installed and driven on a real Linux host — which found twelve bugs,
 > all fixed, five of them capable of locking an operator out of the dashboard.
 > Read [Status](#status) before putting anything real on it.
@@ -189,7 +189,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Status
 
-Everything on the roadmap is built, with 474 tests passing. Much of it has been
+Everything on the roadmap is built, with 488 tests passing. Much of it has been
 verified against real infrastructure rather than mocks — real Docker containers,
 a real Caddy, a real private registry, a real SMTP server, real DNS.
 
@@ -214,9 +214,19 @@ which presents as a dashboard that works, stops, and works again. None of the
 five were reachable from a test suite: each needs the passage of time, or a
 container to be replaced. [ROADMAP.md](ROADMAP.md) has the detail.
 
-A clean install of 0.1.6 has not yet been run end to end — only its parts have.
-Expect rough edges, and the first install is still the most useful thing to
-report on.
+Building the two-factor screen for 0.1.7 found a thirteenth, and it was not
+found by running anything: **login accepted a `totpCode` field and never checked
+it.** Enrolment would have stored a secret, the dashboard would have reported the
+factor as active, and the password alone would still have signed you in. It is
+enforced now — see [ROADMAP.md](ROADMAP.md) — but it is worth knowing that the
+whole feature was decorative until this release, in case you read an earlier
+version's endpoint list and drew a conclusion.
+
+Two things about 0.1.7 specifically. A clean install of it has not been run end
+to end, only its parts. And the two-factor flow has not been driven through a
+browser — the API contract, the enforcement logic and the QR encoder are each
+tested, but nobody has yet clicked through enrolment on a live host. If you turn
+it on, do it with an SSH session already open.
 
 Known gaps, recorded rather than hidden:
 
