@@ -105,13 +105,36 @@ public interface IProxyManager
 /// stopped, so a live hostname returns something explicable rather than a raw
 /// 502 from a proxy with nowhere to send the request.
 /// </param>
+/// <param name="PathOverrides">
+/// Paths on this hostname that go somewhere other than <paramref name="Upstream"/>,
+/// tried in order before it. Only the dashboard uses this: the UI and the API are
+/// separate containers behind one hostname, so <c>/api</c> has to reach one and
+/// everything else the other.
+/// </param>
 public sealed record RouteSpec(
     string Hostname,
     UpstreamTarget Upstream,
     TlsMode Mode = TlsMode.Automatic,
     HstsPolicy? Hsts = null,
     string? RedirectTo = null,
-    bool Maintenance = false);
+    bool Maintenance = false,
+    IReadOnlyList<PathUpstream>? PathOverrides = null);
+
+/// <summary>
+/// Paths within a hostname that reach a different container.
+/// </summary>
+/// <remarks>
+/// Expressed as part of one route rather than as extra routes beside it, because
+/// Caddy evaluates routes in array order and Airside addresses them by
+/// <c>@id</c> — nothing in the upsert path controls where a route lands in that
+/// array. Two sibling routes for one hostname would work or not depending on the
+/// order Caddy happened to hold them in, which is not a property to leave to
+/// chance when the wrong answer sends the dashboard's API calls to the dashboard.
+/// </remarks>
+/// <param name="Paths">
+/// Caddy path matchers, so <c>/api/*</c> rather than a bare prefix.
+/// </param>
+public sealed record PathUpstream(IReadOnlyList<string> Paths, UpstreamTarget Upstream);
 
 /// <summary>
 /// A route as Caddy currently has it.

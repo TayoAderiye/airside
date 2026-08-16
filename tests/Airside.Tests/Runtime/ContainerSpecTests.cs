@@ -111,12 +111,22 @@ public class NamingTests
     }
 
     [Fact]
-    public void SystemContainerNames_AreTheThreeProtectedOnes()
+    public void SystemContainerNames_AreTheFourProtectedOnes()
     {
-        Assert.Equal(3, AirsideLabels.SystemContainers.All.Count);
+        // The count is asserted deliberately. Everything on this list is
+        // undeletable through the platform, so adding a name here quietly widens
+        // what an operator is prevented from removing — and leaving one off is
+        // worse, because it means the platform will happily delete a container it
+        // depends on. Either way the change should be made on purpose.
+        Assert.Equal(4, AirsideLabels.SystemContainers.All.Count);
         Assert.Contains("airside-api", AirsideLabels.SystemContainers.All, StringComparer.Ordinal);
         Assert.Contains("airside-db", AirsideLabels.SystemContainers.All, StringComparer.Ordinal);
         Assert.Contains("airside-proxy", AirsideLabels.SystemContainers.All, StringComparer.Ordinal);
+
+        // The dashboard. Its own container since the UI ships separately from the
+        // API, and system rather than application because deleting it would
+        // remove the only way most operators reach Airside at all.
+        Assert.Contains("airside-ui", AirsideLabels.SystemContainers.All, StringComparer.Ordinal);
     }
 
     [Fact]

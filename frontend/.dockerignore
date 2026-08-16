@@ -1,0 +1,23 @@
+# The build context is this directory, and node_modules alone is several hundred
+# megabytes that the deps stage installs from the lockfile anyway. Sending it
+# would also let a host-built tree — wrong platform, wrong architecture — shadow
+# the one the image installed.
+node_modules
+.next
+
+# Build leftovers and local state, none of which belong in an image.
+tsconfig.tsbuildinfo
+.env*.local
+.DS_Store
+
+# v0 sandbox internals.
+.v0-trash
+.vercel
+.snowflake
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+
+# Instructions for coding agents, not inputs to a build.
+AGENTS.md
+CLAUDE.md

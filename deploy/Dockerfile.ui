@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+#
+# The dashboard. Built with `frontend/` as the context, not the repository root —
+# it shares no source with the API and there is nothing above it to copy.
+#
+#   docker build -f deploy/Dockerfile.ui frontend/
+
+FROM node:24-alpine AS deps
+WORKDIR /src
+
+# corepack reads the "packageManager" field, so the pnpm that resolves this
+# lockfile is the one pinned in package.json rather than whatever ships in the
+# base image this month.
+RUN corepack enable
+
+# Manifests only, so editing a component does not invalidate the install layer.
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+FROM node:24-alpine AS build
+WORKDIR /src
+RUN corepack enable
+
+COPY --from=deps /src/node_modules ./node_modules
+COPY . .
+
+# The version the running dashboard reports to the API's compatibility check,
+# taken from package.json so there is one declaration of it rather than a build
+# argument that can silently disagree. CI refuses to publish a tag that does not
+# match, the same way the API's tag must match Directory.Build.props.
+#
+# AIRSIDE_API_URL is deliberately absent: next.config.mjs only adds its /api
+# rewrite when that is set, and in this image Caddy does the routing. A rewrite
+# baked in here would point at a port inside this container where nothing is
+# listening.
+RUN NEXT_PUBLIC_AIRSIDE_UI_VERSION="$(node -p 'require("./package.json").version')" \
+    pnpm build
+
+FROM node:24-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+# `output: 'standalone'` traces what the server actually imports and copies only
+# that, so no package install happens here and most of node_modules never ships.
+# It does not copy these two, by design — Next expects a CDN to serve them and
+# says to move them in by hand otherwise. Miss them and the dashboard loads as
+# unstyled HTML, which looks like a broken build rather than a missing directory.
+COPY --from=build --chown=node:node /src/.next/standalone ./
+COPY --from=build --chown=node:node /src/.next/static ./.next/static
+COPY --from=build --chown=node:node /src/public ./public
+
+# The node images ship this user at uid 1000. Nothing here needs root: the
+# dashboard serves static assets and proxies nothing, and unlike the API it holds
+# no socket and no credentials — every request that matters is made by the
+# browser against the API, carrying the operator's own session cookie.
+USER node
+
+EXPOSE 3000
+ENV PORT=3000 HOSTNAME=0.0.0.0
+
+LABEL org.opencontainers.image.source="https://github.com/TayoAderiye/airside"
+
+CMD ["node", "server.js"]

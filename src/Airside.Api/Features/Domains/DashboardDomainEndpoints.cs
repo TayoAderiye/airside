@@ -161,9 +161,7 @@ internal static class DashboardDomainEndpoints
         // left alone entirely — it expires on the grace period rather than being
         // withdrawn here, so the URL the administrator is currently using keeps
         // working while DNS propagates.
-        await proxy.UpsertRouteAsync(
-            new RouteSpec(hostname, new UpstreamTarget(Core.Naming.AirsideLabels.SystemContainers.Api, 8080)),
-            ct).ConfigureAwait(false);
+        await proxy.UpsertRouteAsync(DashboardRoute.For(hostname), ct).ConfigureAwait(false);
 
         await audit.WriteAsync(new AuditEntry
         {

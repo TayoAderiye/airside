@@ -145,7 +145,7 @@ public sealed class CaddyProxyManager(
                 .Where(r => r.Id?.StartsWith(RouteIdPrefix, StringComparison.Ordinal) == true)
                 .Select(r => new RouteSpec(
                     r.Match?.FirstOrDefault()?.Host?.FirstOrDefault() ?? string.Empty,
-                    ParseUpstream(r.Handle?.FirstOrDefault()?.Upstreams?.FirstOrDefault()?.Dial))),
+                    ReadDefaultUpstream(r))),
         ];
     }
 
@@ -257,28 +257,30 @@ public sealed class CaddyProxyManager(
                 Body = MaintenanceBody,
             });
         }
-        else
+        else if (route.PathOverrides is { Count: > 0 } overrides)
         {
+            // One subroute rather than several sibling routes, so the order the
+            // paths are tried in is written down here instead of depending on
+            // where Caddy happens to hold each route in its array. The default
+            // goes last and matches nothing in particular, which is what makes it
+            // the default.
             handlers.Add(new CaddyHandler
             {
-                Handler = "reverse_proxy",
-                Upstreams = [new CaddyUpstream { Dial = $"{route.Upstream.ContainerName}:{route.Upstream.Port}" }],
-
-                // Airside terminates TLS, so the upstream is spoken to over plain
-                // HTTP on a private network. These tell the application what the
-                // client actually asked for, which is otherwise lost.
-                Headers = new CaddyProxyHeaders
-                {
-                    Request = new CaddyHeaderOps
+                Handler = "subroute",
+                Routes =
+                [
+                    .. overrides.Select(o => new CaddyRoute
                     {
-                        Set = new Dictionary<string, List<string>>(StringComparer.Ordinal)
-                        {
-                            ["X-Forwarded-Proto"] = [route.Mode == TlsMode.External ? "{http.request.header.X-Forwarded-Proto}" : "https"],
-                            ["X-Forwarded-Host"] = ["{http.request.host}"],
-                        },
-                    },
-                },
+                        Match = [new CaddyMatch { Path = [.. o.Paths] }],
+                        Handle = [Proxy(o.Upstream, route.Mode)],
+                    }),
+                    new CaddyRoute { Handle = [Proxy(route.Upstream, route.Mode)] },
+                ],
             });
+        }
+        else
+        {
+            handlers.Add(Proxy(route.Upstream, route.Mode));
         }
 
         return new CaddyRoute
@@ -292,6 +294,55 @@ public sealed class CaddyProxyManager(
             // ordering.
             Terminal = true,
         };
+    }
+
+    /// <summary>One reverse-proxy handler pointed at a container.</summary>
+    private static CaddyHandler Proxy(UpstreamTarget upstream, TlsMode mode) =>
+        new()
+        {
+            Handler = "reverse_proxy",
+            Upstreams = [new CaddyUpstream { Dial = $"{upstream.ContainerName}:{upstream.Port}" }],
+
+            // Airside terminates TLS, so the upstream is spoken to over plain
+            // HTTP on a private network. These tell the application what the
+            // client actually asked for, which is otherwise lost.
+            Headers = new CaddyProxyHeaders
+            {
+                Request = new CaddyHeaderOps
+                {
+                    Set = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                    {
+                        ["X-Forwarded-Proto"] = [mode == TlsMode.External ? "{http.request.header.X-Forwarded-Proto}" : "https"],
+                        ["X-Forwarded-Host"] = ["{http.request.host}"],
+                    },
+                },
+            },
+        };
+
+    /// <summary>
+    /// The upstream a route sends unmatched traffic to, wherever it is nested.
+    /// </summary>
+    /// <remarks>
+    /// A dashboard route wraps its proxies in a <c>subroute</c>, so reading
+    /// <c>handle[0].upstreams</c> finds nothing. Reconciliation compares what it
+    /// reads here against what it expects, so returning empty for a route that is
+    /// perfectly correct would make it look like drift and be rewritten on every
+    /// pass — forever, since the rewrite produces the same shape again.
+    /// </remarks>
+    private static UpstreamTarget ReadDefaultUpstream(CaddyRoute route)
+    {
+        var direct = route.Handle?.Find(h => h.Handler == "reverse_proxy");
+
+        if (direct is not null)
+        {
+            return ParseUpstream(direct.Upstreams?.FirstOrDefault()?.Dial);
+        }
+
+        // The last nested route is the one with no matcher: the default.
+        var nested = route.Handle?.Find(h => h.Handler == "subroute")?.Routes?.LastOrDefault();
+
+        return ParseUpstream(
+            nested?.Handle?.Find(h => h.Handler == "reverse_proxy")?.Upstreams?.FirstOrDefault()?.Dial);
     }
 
     private const string MaintenanceBody =
@@ -322,7 +373,7 @@ public sealed class CaddyProxyManager(
             .. routes.Select(r => new ObservedRoute(
                 r.Id ?? string.Empty,
                 r.Match?.FirstOrDefault()?.Host?.FirstOrDefault() ?? string.Empty,
-                ParseUpstream(r.Handle?.Find(h => h.Handler == "reverse_proxy")?.Upstreams?.FirstOrDefault()?.Dial),
+                ReadDefaultUpstream(r),
                 r.Id?.StartsWith(RouteIdPrefix, StringComparison.Ordinal) == true)),
         ];
     }
@@ -516,6 +567,8 @@ public sealed class CaddyProxyManager(
     private sealed class CaddyMatch
     {
         public List<string>? Host { get; set; }
+
+        public List<string>? Path { get; set; }
     }
 
     private sealed class CaddyHandler
@@ -523,6 +576,9 @@ public sealed class CaddyProxyManager(
         public string? Handler { get; set; }
 
         public List<CaddyUpstream>? Upstreams { get; set; }
+
+        /// <summary>Nested routes, for the <c>subroute</c> handler.</summary>
+        public List<CaddyRoute>? Routes { get; set; }
 
         /// <summary>
         /// Deliberately untyped: Caddy uses "headers" for two different shapes.

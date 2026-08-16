@@ -40,7 +40,10 @@ public static class AirsideLabels
         public const string Database = "airside-db";
         public const string Proxy = "airside-proxy";
 
-        public static IReadOnlyList<string> All { get; } = [Api, Database, Proxy];
+        /// <summary>The dashboard. Serves the UI only; every call it makes goes to <see cref="Api"/>.</summary>
+        public const string Ui = "airside-ui";
+
+        public static IReadOnlyList<string> All { get; } = [Api, Database, Proxy, Ui];
     }
 
     /// <summary>Host paths that survive container replacement. Written by the installer.</summary>
