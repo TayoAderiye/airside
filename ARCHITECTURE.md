@@ -138,6 +138,8 @@ EC2 host
 ├── airside-api ─────────────────┘   networks: airside-internal, airside-net-app-*
 ├── airside-db (control-plane store) networks: airside-internal
 │                                    — Postgres only; absent under --store=sqlite
+├── airside-ui (the dashboard)       networks: airside-internal
+│                                    — no socket, no volumes, no published port
 ├── airside-proxy (Caddy)            networks: airside-internal + every app network
 │                                    published: 80, 443
 ├── airside-net-db-<slug>    one per database   ← only attached apps join
@@ -146,6 +148,18 @@ EC2 host
 ├── application containers   airside-app-<slug>-<deployment>
 └── named volumes            airside-vol-<slug>-<purpose>
 ```
+
+**The dashboard is a separate image on the same hostname.** Caddy splits the
+dashboard domain by path — `/api`, `/openapi` and `/health` to `airside-api`,
+everything else to `airside-ui` — as one route with a `subroute` handler rather
+than two sibling routes, because Caddy evaluates routes in array order and
+Airside addresses them by `@id`, so sibling ordering would be incidental.
+
+Same origin, so the session cookie works without CORS. The split buys UI
+releases that need no platform release; the cost is that the two can drift, so
+the dashboard reads `GET /api/v1/version` before rendering and refuses on a
+major.minor mismatch. An update pulls and swaps both containers, and CI refuses
+a dashboard-only release outside the API's series.
 
 **Network isolation is pairwise, not zone-based.** There is no shared "edge"
 network that every app sits on. Caddy attaches to each application's own network,

@@ -1,7 +1,12 @@
 # Frontend brief
 
 Everything needed to build the Airside dashboard against the API as it actually
-exists. Hand this to whoever (or whatever) is writing the UI.
+exists.
+
+The dashboard itself now lives in [`frontend/`](../frontend), so this is no
+longer a brief for building one from nothing — it is the set of things the API's
+schema cannot tell you, and they are as binding for changing the existing UI as
+they were for writing it.
 
 ---
 
@@ -187,16 +192,38 @@ Do not design for these — there is no API behind them:
 - Editing files in a repository
 - Image vulnerability scanning
 
-## Hosting the UI
+## How the dashboard is deployed
 
-The API serves JSON only. Two workable arrangements:
+It already exists, in [`frontend/`](../frontend) — a Next.js App Router app. This
+section is what to know before changing how it ships.
 
-1. **Static build served by Caddy** on the dashboard domain, with `/api/*` proxied
-   to the API container. Simplest, no CORS.
-2. **Separate origin.** Then you must configure CORS on the API — it is not
-   enabled by default, deliberately, because the session cookie is the credential.
+**Two images, one hostname.** `ghcr.io/tayoaderiye/airside-ui` runs beside
+`ghcr.io/tayoaderiye/airside`, and Caddy splits the dashboard hostname by path:
+`/api`, `/openapi` and `/health` reach the API, everything else reaches the UI.
+Same origin, so the session cookie works and CORS never enters into it — CORS is
+off on the API deliberately, because that cookie is the credential.
 
-Prefer the first.
+**They must agree on major.minor.** The dashboard bakes its own version in at
+build time and asks `GET /api/v1/version` before rendering anything. On a
+mismatch it refuses and says so, rather than showing screens it may be reading
+wrongly. This is why the split is safe: an update pulls and replaces both
+containers, and a dashboard-only release is refused by CI outside the API's
+series.
+
+Practically, for anyone working on the UI:
+
+- `AIRSIDE_API_URL` makes `next dev` proxy `/api` to an API on another port. It
+  is read at **build** time and is deliberately unset in the image, where Caddy
+  does that routing.
+- `NEXT_PUBLIC_AIRSIDE_UI_VERSION` is the version the check compares. The
+  Dockerfile sets it from `package.json`; it is unset in development, which
+  disables the check.
+- The image is `output: 'standalone'`. Next does not copy `public` or
+  `.next/static` into that bundle — the Dockerfile does. Miss them and the
+  dashboard serves unstyled HTML, which looks like a broken build rather than a
+  missing directory.
+- No analytics, and nothing that calls a third party at runtime. This is the
+  console for somebody else's server.
 
 ## Getting a real instance to build against
 

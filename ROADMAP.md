@@ -370,6 +370,37 @@ only symptom is users unable to log in with a code their phone says is correct.
 
 ---
 
+## Dashboard
+
+Built as a separate Next.js app and shipped as a second image, `airside-ui`,
+served on the dashboard hostname beside the API. Chosen over bundling a static
+export into the API image so a UI fix can ship without a platform release.
+
+Found by running it rather than by reasoning about it:
+
+- The frontend had never been committed anywhere — it lived untracked inside an
+  unrelated parent repository, one disk failure from gone.
+- It rendered `@vercel/analytics` whenever `NODE_ENV` was production, so every
+  self-hosted install would have beaconed to a third party from the console of
+  somebody else's server.
+- With the API unreachable the shell sat on "Loading session…" forever: `loading`
+  went false, `user` stayed null, and no redirect fired. Separate containers make
+  that state ordinary rather than impossible. Detecting it needs more than the
+  gateway statuses — Next's proxy answers a dead upstream with a plain-text 500,
+  and only the absence of Airside's `code`/`type` distinguishes it from a real
+  fault.
+- The rollback command had never worked. It interpolated a digest into the tag
+  half of the reference, producing `repository:sha256:…`, which Docker rejects
+  because a tag may not contain a colon.
+- Both health checks called `wget`, which the chiselled runtime image does not
+  contain — so the compose healthcheck could only fail, and the installer's
+  readiness loop would have failed every install on a healthy host.
+
+Not done: proxy reconciliation still does not restore the dashboard's own route,
+because that hostname lives in `InstanceSettings` rather than in `Domains`.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

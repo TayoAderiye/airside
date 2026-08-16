@@ -27,6 +27,10 @@ and it is not trying to become one.
   reach a database it has been explicitly attached to.
 - **Operations** — resource metrics, notifications by webhook, Slack, or email,
   self-update with rollback, and a CLI that works when the API does not.
+- **A dashboard** — a Next.js UI in [`frontend/`](frontend), shipped as its own
+  image beside the API and served on the same hostname. It checks its version
+  against the API before rendering, and refuses rather than show you screens it
+  may be reading wrongly.
 
 ## Install
 
@@ -103,10 +107,17 @@ verified against real infrastructure rather than mocks — real Docker container
 a real Caddy, a real private registry, a real SMTP server, real DNS.
 
 **What has not happened yet:** the installer has never been run on a fresh Linux
-host. All verification so far has been on macOS with Docker Desktop, driving the
-API directly. `install.sh` writes `/etc/docker/daemon.json`, creates
-`/var/lib/airside`, and detects the host's docker group — none of which has
-executed once.
+host. All verification so far has been on macOS with Docker Desktop. `install.sh`
+writes `/etc/docker/daemon.json`, creates `/var/lib/airside`, and detects the
+host's docker group — none of which has executed once.
+
+For a sense of what that means in practice: building the images turned up that
+both health checks called `wget`, which the chiselled runtime image does not
+contain. The compose healthcheck could only ever fail, and the installer's
+readiness loop would have ended every install with *"the API did not become
+healthy"* on a host where the API was fine. Both are fixed, but they were found
+by running the thing, and the parts that still have not been run are the parts
+still likely to be wrong.
 
 So: expect the first install to break. If you are trying this early, that is the
 part worth reporting.
@@ -120,6 +131,8 @@ Known gaps, recorded rather than hidden:
 - Notification schedules have no holiday calendar — "weekdays" includes
   Christmas Day.
 - Metric retention is hourly rollups for 90 days, with no configuration.
+- Proxy reconciliation restores application routes but not the dashboard's own,
+  so a replaced proxy container needs the dashboard domain set again by hand.
 
 ## Building from source
 
@@ -132,6 +145,17 @@ dotnet test
 Needs the .NET SDK named in `global.json`. The Docker-backed integration tests
 skip when no daemon is available; set `AIRSIDE_REQUIRE_DOCKER=1` to make that a
 failure instead, which is what CI does.
+
+The dashboard is separate, and needs Node 24 and pnpm:
+
+```bash
+cd frontend
+pnpm install
+pnpm build
+```
+
+`pnpm dev` wants an API to talk to — copy `.env.example` to `.env.local` and
+point `AIRSIDE_API_URL` at one. It is read at build time, not run time.
 
 ## Licence
 
