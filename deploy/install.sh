@@ -13,7 +13,7 @@ set -eu
 AIRSIDE_ROOT="${AIRSIDE_ROOT:-/opt/airside}"
 AIRSIDE_DATA="${AIRSIDE_DATA:-/var/lib/airside}"
 # Keep in step with VersionPrefix in Directory.Build.props.
-AIRSIDE_VERSION="${AIRSIDE_VERSION:-0.1.9}"
+AIRSIDE_VERSION="${AIRSIDE_VERSION:-0.1.10}"
 AIRSIDE_STORE_PROVIDER="${AIRSIDE_STORE_PROVIDER:-Postgres}"
 
 log()  { printf '  %s\n' "$*"; }

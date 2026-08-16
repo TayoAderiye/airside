@@ -655,6 +655,69 @@ Two things worth keeping:
 
 ---
 
+## Querying the control plane, and a wall of red — **done**
+
+Two things, both reported by looking at a working screen and finding it useless.
+
+### The store was excluded from the query console
+
+Refused originally with what reads like a good reason: it holds every
+credential, session and audit row on the host, so a console pointed at it is not
+a feature. The operator's answer was one line — *"i should be able to query the
+airside db"* — and they were right.
+
+The reasoning does not survive contact with the product:
+
+- **An Airside login is already a root login.** The README says so in its own
+  security section. Anyone who can reach this screen can start a container with
+  the Docker socket mounted.
+- **The documented recovery path is `docker exec airside-db psql`.** It is in
+  the README, and I handed it to the same operator earlier in the session as the
+  way to undo an MFA lockout. The access was never withheld — only the good
+  interface to it was.
+
+So refusing protected nothing and removed the tool most likely to answer the
+question someone came to that screen with. What is kept is the product's own
+guard rather than one invented here: writes need
+`database.query_destructive`, exactly as for any other database. Reads are
+audited under a distinct action, so *"who read the table holding every
+credential on this host"* is answerable without joining on workload ids.
+
+Credentials come from the connection string the API already holds, because there
+is nowhere else — the store is created by compose and has no credential row.
+Under the SQLite provider it refuses and says why: there is no container to exec
+into.
+
+### Every stderr line was painted as a failure
+
+The log viewer coloured by stream. Postgres, nginx, Redis and most server images
+write their *entire normal log* to stderr, so a healthy store rendered as an
+unbroken wall of red checkpoint messages.
+
+That is worse than no colour at all, in both directions: alarming when nothing
+is wrong, and unremarkable when something finally is. Severity now comes from the
+text. Crude, and it will miss things — but a missed highlight costs a reader
+nothing, while a screen of false red costs them the ability to spot the real one.
+
+Checked against output from both sides rather than assumed: Postgres checkpoint
+and startup lines, an nginx access line, a Redis ready line and ASP.NET's `info:`
+prefix stay plain; Postgres `FATAL`, an nginx `[error]`, a .NET unhandled
+exception, a Go `panic:` and ASP.NET's `fail:` prefix all light up.
+
+### The pattern worth naming
+
+Both of these, and the create-form failure before them, are the same mistake in
+different clothes: **a defensible-sounding rule applied one step wider than the
+thing it protects.** Ids that match no row made destructive actions unreachable,
+and also made logs unreadable. A store full of secrets should not be casually
+writable, and was made unreadable. stderr carries errors, so everything on stderr
+was an error.
+
+None of them are visible from the code. Each was found by someone looking at the
+screen and asking why it would not do the obvious thing.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

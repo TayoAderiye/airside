@@ -6,6 +6,7 @@ using Airside.Core.Audit;
 using Airside.Core.Common;
 using Airside.Core.Databases;
 using Airside.Core.Jobs;
+using Airside.Core.Naming;
 using Airside.Core.Queries;
 using Airside.Core.Security;
 using Airside.Data;
@@ -450,6 +451,7 @@ internal static class BackupEndpoints
         AirsideDbContext db,
         IQueryConsoleFactory consoles,
         ISecretProtector protector,
+        ControlPlaneQueryTarget controlPlane,
         IAuditWriter audit,
         TimeProvider timeProvider,
         HttpContext http,
@@ -462,26 +464,57 @@ internal static class BackupEndpoints
             .FirstOrDefaultAsync(d => d.Id == id, ct)
             .ConfigureAwait(false);
 
-        if (database?.ContainerId is null)
+        DatabaseEndpoint endpoint;
+        DatabaseCredentialValue credentialValue;
+        DatabaseEngineKind engine;
+        string slug;
+        var isControlPlane = false;
+
+        if (database?.ContainerId is not null)
+        {
+            var credential = database.Credentials.First(c => c.IsPrimary && c.State == CredentialState.Active);
+            var password = protector.Unprotect(credential.EncryptedPassword);
+
+            if (password.IsFailure)
+            {
+                return password.Failure!.ToProblem();
+            }
+
+            endpoint = new DatabaseEndpoint(database.ContainerId, database.Slug, 0, database.DatabaseName);
+            credentialValue = new DatabaseCredentialValue(credential.Username, password.Value);
+            engine = database.Engine;
+            slug = database.Slug;
+        }
+        else if (SystemWorkloadReader.ResolveContainerName(id) == AirsideLabels.SystemContainers.Database)
+        {
+            // Airside's own store. Reachable here because refusing did not
+            // withhold anything — the documented recovery path is a psql shell on
+            // the host — while costing the operator the tool that would have
+            // answered the question they came with.
+            var target = await controlPlane.ResolveAsync(ct).ConfigureAwait(false);
+
+            if (target.IsFailure)
+            {
+                return target.Failure!.ToProblem();
+            }
+
+            (endpoint, credentialValue) = target.Value;
+            engine = ControlPlaneQueryTarget.Engine;
+            slug = AirsideLabels.SystemContainers.Database;
+            isControlPlane = true;
+        }
+        else
         {
             return new Error(ErrorCodes.WorkloadNotFound, "No such running database.").ToProblem();
         }
 
-        var credential = database.Credentials.First(c => c.IsPrimary && c.State == CredentialState.Active);
-        var password = protector.Unprotect(credential.EncryptedPassword);
-
-        if (password.IsFailure)
-        {
-            return password.Failure!.ToProblem();
-        }
-
         var userId = CurrentUserId(http);
 
-        var console = consoles.Create(database.Engine, credential.Username);
+        var console = consoles.Create(engine, credentialValue.Username);
 
         var execution = new QueryExecution(
-            new DatabaseEndpoint(database.ContainerId, database.Slug, 0, database.DatabaseName),
-            new DatabaseCredentialValue(credential.Username, password.Value),
+            endpoint,
+            credentialValue,
             request.Statement,
             Math.Clamp(request.MaxRows ?? 500, 1, 5000),
             TimeSpan.FromSeconds(Math.Clamp(request.TimeoutSeconds ?? 30, 1, 300)),
@@ -490,7 +523,10 @@ internal static class BackupEndpoints
         var started = timeProvider.GetUtcNow().UtcDateTime;
         var result = await console.ExecuteAsync(execution, ct).ConfigureAwait(false);
 
-        if (userId is { } uid)
+        // History rows carry a foreign key to a workload, and the control-plane
+        // store is not one. Skipped rather than faked with an id that matches no
+        // row, which is what made these ids safe in the first place.
+        if (userId is { } uid && !isControlPlane)
         {
             await RecordHistoryAsync(db, uid, id, request.Statement, started, result, timeProvider, ct)
                 .ConfigureAwait(false);
@@ -498,12 +534,15 @@ internal static class BackupEndpoints
 
         await audit.WriteAsync(new AuditEntry
         {
-            Action = AuditActions.QueryExecuted,
+            // A distinct action for the control-plane store, so "who read the
+            // table holding every credential on this host" is a question the
+            // audit log can answer without joining against workload ids.
+            Action = isControlPlane ? "query.control_plane_executed" : AuditActions.QueryExecuted,
             Result = result.IsSuccess ? AuditResult.Success : AuditResult.Denied,
             UserId = userId,
-            ResourceKind = "database",
+            ResourceKind = isControlPlane ? "control_plane" : "database",
             ResourceId = id,
-            ResourceSlugSnapshot = database.Slug,
+            ResourceSlugSnapshot = slug,
             IpAddress = http.Connection.RemoteIpAddress?.ToString(),
             Metadata = new Dictionary<string, object?>(StringComparer.Ordinal)
             {

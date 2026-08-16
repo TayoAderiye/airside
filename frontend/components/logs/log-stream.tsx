@@ -8,6 +8,30 @@ import { cn } from '@/lib/utils'
 type Line = { timestamp: string; stream: 'stdout' | 'stderr'; text: string }
 
 /**
+ * Whether a line should be shown as a failure.
+ *
+ * Not simply "came from stderr". Postgres, nginx, Redis and most server images
+ * write their entire normal log to stderr, so colouring by stream painted a
+ * healthy container's checkpoint messages in the same red as a crash — which
+ * makes the colour worthless in both directions: alarming when nothing is
+ * wrong, and unremarkable when something is.
+ *
+ * The text decides instead. Matching on words is crude and will miss things,
+ * but a missed highlight costs a reader nothing, whereas a screen of false red
+ * costs them the ability to spot the real one.
+ *
+ * Checked against real output from both sides: Postgres checkpoint and startup
+ * lines, an nginx access line, a Redis ready line and ASP.NET's `info:` prefix
+ * stay plain; Postgres `FATAL`, an nginx `[error]`, a .NET unhandled exception,
+ * a Go `panic:` and ASP.NET's `fail:` prefix all light up.
+ */
+function severityOf(line: Line): 'error' | 'normal' {
+  return /\b(err|error|fatal|panic|fail(ed|ure)?|exception|critical)\b/i.test(line.text)
+    ? 'error'
+    : 'normal'
+}
+
+/**
  * A container log, live, for a workload of either kind.
  *
  * This took a database id until applications got a stream of their own, because
@@ -120,7 +144,7 @@ export function LogStream({
           shown.map((l, i) => (
             <p key={`${l.timestamp}-${i}`} className="whitespace-pre-wrap break-all">
               <span className="text-muted-foreground/60">{l.timestamp.slice(11, 23)} </span>
-              <span className={cn(l.stream === 'stderr' ? 'text-failed' : 'text-foreground')}>{l.text}</span>
+              <span className={cn(severityOf(l) === 'error' ? 'text-failed' : 'text-foreground')}>{l.text}</span>
             </p>
           ))
         )}

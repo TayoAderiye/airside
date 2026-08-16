@@ -207,6 +207,9 @@ builder.Services.AddScoped<DatabaseService>();
 // Scoped rather than singleton: it asks Docker for current state, and a cached
 // answer would show a stopped container as running.
 builder.Services.AddScoped<Airside.Api.Features.SystemWorkloadReader>();
+builder.Services.AddScoped(sp => new Airside.Api.Features.Databases.ControlPlaneQueryTarget(
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AirsideStoreOptions>>().Value,
+    sp.GetRequiredService<Airside.Core.Containers.IContainerRuntime>()));
 builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
 builder.Services.AddScoped<IBackupStore, BackupStore>();
 builder.Services.AddScoped<ApplicationService>();
