@@ -132,7 +132,7 @@ path traversal rejected.
 
 ---
 
-## Phase 5 — Networking and TLS
+## Phase 5 — Networking and TLS — **done**
 
 **`Airside.Data`** — `Domain`; migration `0005_Networking` ×2.
 
@@ -145,6 +145,43 @@ proxy's attach/detach to each application network.
 **Tests** — an application cannot reach an unattached database (integration, and
 the single most important test in the suite); route upsert is idempotent; the
 proxy admin API is unreachable from a workload network.
+
+All three are in place. The first two run against a real daemon
+(`tests/Airside.Tests/Integration/`) and skip without one, or fail if
+`AIRSIDE_REQUIRE_DOCKER=1` — which CI sets, so a broken daemon cannot make the
+isolation test quietly disappear. Both include a positive control: the isolation
+test re-attaches the network mid-way and shows reach returning, because a "cannot
+connect" result proves nothing on a rig that never connected.
+
+### Found by running it
+
+Four defects that unit tests and review had both missed, three of them in code
+from earlier phases:
+
+- **Any stock image failed to deploy.** Applications ran with `CapDrop=ALL` and
+  nothing restored, so `nginx` died on `chown … Operation not permitted` — as
+  would Apache, PHP-FPM, and most official web images. Phase 4 was verified with a
+  hand-written Dockerfile running as root on a high port, the one shape that
+  survives. Fixed with `ContainerSecurity.Application`, pinned by
+  `StockImageStartupTests`, which includes a negative control that fails if the
+  old profile ever starts working.
+- **A job left `Compensating` blocked its workload for ever.** Recovery moved
+  orphans to `Compensating`, but the claim query only looked for `Queued`, so they
+  were never picked up — and a `Compensating` row marks its workload busy, so
+  every later job for it waited behind a job that could never finish. Covered by
+  `JobRecoveryTests`, confirmed to fail without the fix.
+- **Unbinding a domain did not withdraw its route.** The endpoint soft-deletes the
+  row before enqueuing the job, so the handler read back nothing, treated it as
+  already gone, and reported success — leaving the hostname serving until
+  reconciliation caught it up to two minutes later. The hostname now travels in
+  the payload.
+- **`deploy/caddy.json` stopped Caddy from starting.** Its `"//"` comment keys are
+  rejected by Caddy's strict config parsing (`json: unknown field "//"`). The
+  reasoning moved to `deploy/README.md`.
+
+Also: `Secret` construction on the unauthenticated setup endpoint turned a
+malformed body into a 500 rather than a validation error, and the setup-token box
+had one row a character too wide.
 
 ---
 

@@ -100,7 +100,13 @@ internal sealed class ApplicationStore(
             AirsideNames.ApplicationNetwork(slug),
             app.ContainerId,
             rendered.Entries,
-            [.. attachments.Select(a => a.NetworkName)]);
+            [.. attachments.Select(a => a.NetworkName)],
+            await db.Domains
+                .AsNoTracking()
+                .Where(d => d.ApplicationId == applicationId && d.State != DomainState.Failed)
+                .Select(d => d.Hostname)
+                .ToListAsync(ct)
+                .ConfigureAwait(false));
     }
 
     private async Task<List<(AttachedDatabase Attached, string NetworkName)>> LoadAttachmentsAsync(

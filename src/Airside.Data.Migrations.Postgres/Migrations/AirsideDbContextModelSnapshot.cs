@@ -475,6 +475,74 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.ToTable("deployment_logs", (string)null);
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.Domain", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApplicationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("CertificateAutoRenew")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("CertificateIssuer")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("CertificateNotAfter")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CertificateNotBefore")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastCertificateCheckAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RouteId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId");
+
+                    b.HasIndex("Hostname")
+                        .IsUnique();
+
+                    b.ToTable("domains", (string)null);
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.EnvironmentVariable", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1587,6 +1655,17 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                         .IsRequired();
 
                     b.Navigation("Deployment");
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.Domain", b =>
+                {
+                    b.HasOne("Airside.Data.Entities.Application", "Application")
+                        .WithMany()
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Application");
                 });
 
             modelBuilder.Entity("Airside.Data.Entities.EnvironmentVariable", b =>

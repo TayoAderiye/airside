@@ -150,17 +150,25 @@ internal static class SetupTokenPrinter
         // Written straight to stdout rather than through the logger: a structured
         // log line would be shipped, indexed, and retained, and this value is a
         // credential for the next 24 hours.
+        // Every row is padded to the same interior width rather than hand-spaced.
+        // Hand-spacing had one line a character wide, which is invisible while
+        // writing and obvious in a terminal.
         Console.WriteLine();
-        Console.WriteLine("  ┌─────────────────────────────────────────────────────────────┐");
-        Console.WriteLine("  │  Airside is not set up yet.                                 │");
-        Console.WriteLine("  │  Open the dashboard and use this one-time setup token:       │");
-        Console.WriteLine("  │                                                             │");
-        Console.WriteLine($"  │  {token.Reveal(),-58} │");
-        Console.WriteLine("  │                                                             │");
-        Console.WriteLine("  │  It expires in 24 hours and is consumed on first use.       │");
-        Console.WriteLine("  └─────────────────────────────────────────────────────────────┘");
+        Console.WriteLine($"  ┌{new string('─', BoxWidth)}┐");
+        BoxLine("Airside is not set up yet.");
+        BoxLine("Open the dashboard and use this one-time setup token:");
+        BoxLine(string.Empty);
+        BoxLine(token.Reveal());
+        BoxLine(string.Empty);
+        BoxLine("It expires in 24 hours and is consumed on first use.");
+        Console.WriteLine($"  └{new string('─', BoxWidth)}┘");
         Console.WriteLine();
 
         logger.LogInformation("A setup token was issued and printed to the console; it expires in 24 hours");
     }
+
+    private const int BoxWidth = 61;
+
+    private static void BoxLine(string text) =>
+        Console.WriteLine($"  │  {text.PadRight(BoxWidth - 2)}│");
 }

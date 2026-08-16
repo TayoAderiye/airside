@@ -146,6 +146,69 @@ public sealed record ContainerSecurity(
         AddCapabilities: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
         ReadOnlyRootFilesystem: false,
         User: null);
+
+    /// <summary>
+    /// Deployed applications: everything dropped, then the handful an ordinary
+    /// image's entrypoint needs to reach the point of serving a request.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Default</c> was used here first, and it is wrong for almost every real
+    /// image. Stock <c>nginx</c> dies on
+    /// <c>chown("/var/cache/nginx/client_temp", 101) failed (1: Operation not
+    /// permitted)</c>; Apache, PHP-FPM, and most official web images fail the same
+    /// way. They start as root, fix ownership on a cache or run directory, and
+    /// de-escalate — the identical pattern already documented for
+    /// <see cref="DatabaseEngine"/>.
+    /// </para>
+    /// <para>
+    /// <c>NET_BIND_SERVICE</c> is here on top of that set because an application
+    /// that listens on 80 inside its own container is completely ordinary, and
+    /// without it the image cannot bind. It permits binding a low port in the
+    /// container's own network namespace and nothing else — it grants no reach
+    /// over the host, whose ports are bound by the proxy.
+    /// </para>
+    /// <para>
+    /// What stays dropped is what an attacker would actually want:
+    /// <c>SYS_ADMIN</c>, <c>SYS_PTRACE</c>, <c>SYS_MODULE</c>, <c>NET_ADMIN</c>,
+    /// <c>NET_RAW</c>, <c>MKNOD</c>, <c>SYS_CHROOT</c>, and the rest. With
+    /// <c>NoNewPrivileges</c> set, a process that de-escalates cannot climb back.
+    /// </para>
+    /// </remarks>
+    public static ContainerSecurity Application { get; } = new(
+        NoNewPrivileges: true,
+        DropCapabilities: ["ALL"],
+        AddCapabilities: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "NET_BIND_SERVICE"],
+        ReadOnlyRootFilesystem: false,
+        User: null);
+
+    /// <summary>
+    /// The reverse proxy, which needs <c>NET_BIND_SERVICE</c> to exist at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Also found by running it, and the failure mode is worth writing down
+    /// because it looks nothing like a permissions problem: with
+    /// <c>CapDrop=ALL</c> the Caddy image dies on
+    /// <c>exec /usr/bin/caddy: operation not permitted</c> before Caddy prints a
+    /// single line of its own.
+    /// </para>
+    /// <para>
+    /// The cause is that the binary carries file capabilities
+    /// (<c>cap_net_bind_service=+ep</c>, so it can bind 80 and 443 as a non-root
+    /// user). The kernel refuses to <c>execve</c> a file with permitted
+    /// capabilities that are not in the bounding set, so dropping ALL does not
+    /// produce a proxy that cannot bind low ports — it produces a container that
+    /// never starts. Restoring the one capability the binary already declares
+    /// costs nothing: it is precisely the privilege the proxy's whole job needs.
+    /// </para>
+    /// </remarks>
+    public static ContainerSecurity Proxy { get; } = new(
+        NoNewPrivileges: true,
+        DropCapabilities: ["ALL"],
+        AddCapabilities: ["NET_BIND_SERVICE"],
+        ReadOnlyRootFilesystem: false,
+        User: null);
 }
 
 /// <param name="Command">An argument vector, never a command line.</param>

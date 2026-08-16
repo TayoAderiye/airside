@@ -390,6 +390,24 @@ as a separate reviewable project.
 - **Volume paths are allowlisted.** Bind mounts are permitted only under the
   managed volume root. Arbitrary host paths from user input are rejected — a
   bind mount of `/` into a user container is a full host compromise.
+- **Capability sets are chosen from `ContainerSecurity`, and every one of them is
+  verified by starting a real image.** There are four — `Default`,
+  `DatabaseEngine`, `Application`, `Proxy` — and all drop `ALL` before restoring a
+  named few. Do not add a fifth by reasoning about what an image "should" need.
+
+  A capability set fails in a direction that looks safe: dropping everything reads
+  as the strictest possible choice, passes review, and then makes the container
+  unrunnable. All three profiles beyond `Default` exist because a bare
+  `CapDrop=ALL` broke something, and none of the three failures named
+  capabilities. Postgres said `failed switching to 'postgres'`. Nginx said
+  `chown … Operation not permitted`. Caddy said
+  `exec /usr/bin/caddy: operation not permitted` — the kernel refusing to `execve`
+  a binary whose file capabilities are outside the bounding set, before the
+  process existed at all.
+
+  So a new profile needs an integration test that starts the image and asserts it
+  stays up, next to the others in `StockImageStartupTests`.
+
 - **Every managed object is labelled**, without exception, or reconciliation
   cannot see it:
 

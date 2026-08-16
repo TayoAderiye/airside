@@ -1,0 +1,21 @@
+{
+  "admin": {
+    "listen": "0.0.0.0:2019",
+    "origins": ["airside-proxy:2019", "airside-api:2019", "localhost:2019"]
+  },
+  "logging": {
+    "logs": {
+      "default": { "level": "WARN", "encoder": { "format": "json" } }
+    }
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "airside": {
+          "listen": [":80", ":443"],
+          "routes": []
+        }
+      }
+    }
+  }
+}

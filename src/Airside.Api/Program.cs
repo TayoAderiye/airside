@@ -17,6 +17,7 @@ using Airside.Data.Migrations.Sqlite;
 using Airside.Data.Seeding;
 using Airside.Runtime;
 using Airside.Runtime.Jobs;
+using Airside.Runtime.Proxy;
 using Airside.Runtime.Security;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -144,6 +145,10 @@ builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
 builder.Services.AddScoped<IBackupStore, BackupStore>();
 builder.Services.AddScoped<ApplicationService>();
 builder.Services.AddScoped<IApplicationStore, ApplicationStore>();
+builder.Services.AddScoped<DomainStore>();
+builder.Services.AddScoped<IDomainStore>(sp => sp.GetRequiredService<DomainStore>());
+builder.Services.Configure<CaddyOptions>(builder.Configuration.GetSection(CaddyOptions.Section));
+builder.Services.AddHostedService<ProxyReconciliationService>();
 builder.Services.AddHostedService<HostDiscoveryService>();
 
 builder.Services.AddProblemDetails();
@@ -219,6 +224,7 @@ app.MapSystemEndpoints();
 app.MapDatabaseEndpoints();
 app.MapBackupEndpoints();
 app.MapApplicationEndpoints();
+app.MapDomainEndpoints();
 
 app.MapRealtimeEndpoints();
 if (app.Environment.IsDevelopment())

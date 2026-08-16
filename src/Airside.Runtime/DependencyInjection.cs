@@ -8,7 +8,9 @@ using Airside.Runtime.Jobs;
 using Airside.Core.Hosting;
 using Airside.Core.Security;
 using Airside.Runtime.Docker;
+using Airside.Core.Proxy;
 using Airside.Runtime.Hosting;
+using Airside.Runtime.Proxy;
 using Airside.Runtime.Security;
 using Docker.DotNet;
 using Microsoft.Extensions.DependencyInjection;
@@ -86,10 +88,22 @@ public static class DependencyInjection
         services.AddScoped<IJobHandler, DatabaseProvisionHandler>();
         services.AddSingleton<BackupExecutor>();
         services.AddSingleton<GitSource>();
+
+        // A typed client so the admin address is configured once. The timeout is
+        // short: a proxy that is not answering should fail a deploy quickly rather
+        // than hold the job dispatcher, which runs one job at a time.
+        services.AddHttpClient<IProxyManager, CaddyProxyManager>((sp, client) =>
+        {
+            var proxy = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<CaddyOptions>>().Value;
+            client.BaseAddress = new Uri(proxy.AdminAddress);
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         services.AddSingleton<EnvironmentRenderer>();
 
         services.AddScoped<IJobHandler, DeployHandler>();
         services.AddScoped<IJobHandler, AttachmentHandler>();
+        services.AddScoped<IJobHandler, BindDomainHandler>();
+        services.AddScoped<IJobHandler, UnbindDomainHandler>();
         services.AddScoped<IJobHandler, DatabaseBackupHandler>();
         services.AddScoped<IJobHandler, DatabaseRestoreHandler>();
         services.AddScoped<IJobHandler, RotateCredentialsHandler>();

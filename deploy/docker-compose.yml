@@ -93,7 +93,10 @@ services:
     volumes:
       - airside-caddy-data:/data
       - airside-caddy-config:/config
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy.json:/etc/caddy/caddy.json:ro
+    # A JSON config rather than a Caddyfile: Airside drives routes through the
+    # admin API, and the server name those API paths depend on has to be stable.
+    command: ["caddy", "run", "--config", "/etc/caddy/caddy.json"]
     networks:
       - airside-internal
     # Port 2019 (the admin API) is deliberately NOT published. It is

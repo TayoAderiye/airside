@@ -58,7 +58,8 @@ public sealed record ApplicationSnapshot(
     string NetworkName,
     string? CurrentContainerId,
     IReadOnlyList<EnvironmentEntry> Environment,
-    IReadOnlyList<string> AttachedNetworks);
+    IReadOnlyList<string> AttachedNetworks,
+    IReadOnlyList<string> Hostnames);
 
 public interface IApplicationStore
 {
@@ -113,6 +114,7 @@ public sealed class DeployHandler(
     IContainerRuntime runtime,
     IApplicationStore store,
     GitSource git,
+    Core.Proxy.IProxyManager proxy,
     ILogger<DeployHandler> logger) : IJobHandler
 {
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromMinutes(5);
@@ -197,6 +199,25 @@ public sealed class DeployHandler(
                 ErrorCodes.ApplicationHealthCheckFailed,
                 "The new container never became healthy and was removed. The previous version is "
                 + "still serving traffic.");
+        }
+
+        // The cutover. Traffic moves to the healthy new container before the old
+        // one is touched, which is the whole of zero downtime: at no point is a
+        // hostname pointing at something that is not serving.
+        if (app.Hostnames.Count > 0)
+        {
+            await context.ReportProgressAsync(85, "Moving traffic to the new version", ct).ConfigureAwait(false);
+
+            foreach (var hostname in app.Hostnames)
+            {
+                await proxy.SwapUpstreamAsync(
+                    hostname, new Core.Proxy.UpstreamTarget(containerName, app.ContainerPort), ct)
+                    .ConfigureAwait(false);
+            }
+
+            await context.LogStepAsync(
+                "cutover", $"Traffic moved to the new container for {string.Join(", ", app.Hostnames)}.", ct)
+                .ConfigureAwait(false);
         }
 
         // Only now is the old container touched. Everything above could fail
@@ -385,7 +406,7 @@ public sealed class DeployHandler(
 
             // An application image is not Airside's, so it gets the strict
             // profile: no capabilities restored, no privilege escalation.
-            Security = ContainerSecurity.Default,
+            Security = ContainerSecurity.Application,
         };
 
         var containerId = await runtime.Containers.CreateAsync(spec, ct).ConfigureAwait(false);

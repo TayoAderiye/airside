@@ -63,6 +63,8 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
 
     public DbSet<SourceCredential> SourceCredentials => Set<SourceCredential>();
 
+    public DbSet<Domain> Domains => Set<Domain>();
+
     public DbSet<Backup> Backups => Set<Backup>();
 
     public DbSet<Restore> Restores => Set<Restore>();

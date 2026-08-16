@@ -55,6 +55,29 @@ internal static class SetupEndpoints
         HttpContext http,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Checked before anything touches the database. This endpoint is
+        // unauthenticated by necessity, so a body with a field missing has to come
+        // back as a validation error — reaching the Secret constructor with a null
+        // turns a typo into a 500 that tells the caller nothing and puts an
+        // unhandled exception on the one path every install goes through.
+        foreach (var (field, value) in new[]
+        {
+            ("setupToken", request.SetupToken),
+            ("email", request.Email),
+            ("password", request.Password),
+        })
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return new Error(
+                    ErrorCodes.ValidationFailed,
+                    $"'{field}' is required.",
+                    new Dictionary<string, object?>(StringComparer.Ordinal) { ["field"] = field }).ToProblem();
+            }
+        }
+
         var settings = await db.InstanceSettings.FirstAsync(ct).ConfigureAwait(false);
 
         var invalidToken = new Error(

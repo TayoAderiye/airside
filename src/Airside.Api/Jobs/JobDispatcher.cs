@@ -257,6 +257,27 @@ public sealed class JobDispatcherService(
     /// </remarks>
     private async Task<Job?> ClaimNextAsync(AirsideDbContext db, CancellationToken ct)
     {
+        // Jobs this process adopted for compensation come first, and are looked up
+        // separately because they are not Queued.
+        //
+        // Without this the recovery path below does nothing: RecoverOrphanedJobsAsync
+        // moves an orphan to Compensating, but a query for Queued rows never sees it
+        // again, so it never unwinds. Worse, a Compensating row counts as a busy
+        // workload — so the stuck job blocks every later job for that workload for
+        // ever, and because the dispatcher is one reader loop the queue behind it
+        // stops moving too. Found when a second deploy sat Queued indefinitely
+        // behind a deploy left Compensating by a previous process.
+        var adopted = await db.Jobs
+            .Where(j => j.Status == JobStatus.Compensating && j.LeaseOwner == _leaseOwner)
+            .OrderBy(j => j.QueuedAt)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (adopted is not null)
+        {
+            return adopted;
+        }
+
         var busyWorkloads = await db.Jobs
             .Where(j => j.Status == JobStatus.Running || j.Status == JobStatus.Compensating)
             .Select(j => j.WorkloadId)
