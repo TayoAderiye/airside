@@ -3,8 +3,8 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Airside.Core.Containers;
-using DD = Docker.DotNet;
 using Microsoft.Extensions.Logging;
+using DD = Docker.DotNet;
 using DM = Docker.DotNet.Models;
 
 namespace Airside.Runtime.Docker;

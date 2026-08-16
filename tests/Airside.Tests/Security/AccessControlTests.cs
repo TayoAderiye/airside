@@ -1,8 +1,8 @@
+using System.Security.Claims;
 using Airside.Api.Security;
 using Airside.Core.Security;
 using Airside.Runtime.Security;
 using Microsoft.AspNetCore.Authorization;
-using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 

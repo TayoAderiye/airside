@@ -288,94 +288,94 @@ public sealed class DeployHandler(
         switch (app.Source)
         {
             case DeploymentSource.ExistingDigest:
-            {
-                // A rollback resolves locally and never pulls. The image was built
-                // here and exists in no registry, so a pull would fail with a
-                // registry error that says nothing about the real problem — and if
-                // the image has been pruned, the honest answer is that this
-                // rollback is no longer possible, not a silent rebuild from source
-                // that would produce a different artefact wearing the same number.
-                await context.ReportProgressAsync(15, "Resolving the previous image", ct).ConfigureAwait(false);
+                {
+                    // A rollback resolves locally and never pulls. The image was built
+                    // here and exists in no registry, so a pull would fail with a
+                    // registry error that says nothing about the real problem — and if
+                    // the image has been pruned, the honest answer is that this
+                    // rollback is no longer possible, not a silent rebuild from source
+                    // that would produce a different artefact wearing the same number.
+                    await context.ReportProgressAsync(15, "Resolving the previous image", ct).ConfigureAwait(false);
 
-                var previous = await runtime.Images
-                    .FindAsync(ImageReference.Parse(app.ImageRef!), ct)
-                    .ConfigureAwait(false);
+                    var previous = await runtime.Images
+                        .FindAsync(ImageReference.Parse(app.ImageRef!), ct)
+                        .ConfigureAwait(false);
 
-                return previous ?? throw new DeploymentImageMissingException(
-                    "The image for that deployment is no longer on this host, so it cannot be rolled back "
-                    + "to. Deploy again from source instead — that produces a new build, not the old one.");
-            }
+                    return previous ?? throw new DeploymentImageMissingException(
+                        "The image for that deployment is no longer on this host, so it cannot be rolled back "
+                        + "to. Deploy again from source instead — that produces a new build, not the old one.");
+                }
 
             case DeploymentSource.Image:
-            {
-                await context.ReportProgressAsync(15, "Pulling image", ct).ConfigureAwait(false);
-
-                var image = ImageReference.Parse(app.ImageRef!);
-                var auth = await registries.ResolveAsync(image, ct).ConfigureAwait(false);
-
-                if (auth is not null)
                 {
-                    // Named in the log, because a pull that fails on a private
-                    // registry otherwise reports a missing image and sends the
-                    // operator looking for a typo in the tag.
-                    await context.LogStepAsync(
-                        "pull",
-                        $"Using the stored credential for {auth.Registry} (user {auth.Username}).",
+                    await context.ReportProgressAsync(15, "Pulling image", ct).ConfigureAwait(false);
+
+                    var image = ImageReference.Parse(app.ImageRef!);
+                    var auth = await registries.ResolveAsync(image, ct).ConfigureAwait(false);
+
+                    if (auth is not null)
+                    {
+                        // Named in the log, because a pull that fails on a private
+                        // registry otherwise reports a missing image and sends the
+                        // operator looking for a typo in the tag.
+                        await context.LogStepAsync(
+                            "pull",
+                            $"Using the stored credential for {auth.Registry} (user {auth.Username}).",
+                            ct).ConfigureAwait(false);
+                    }
+
+                    return await runtime.Images.PullAsync(image, progress, auth, ct).ConfigureAwait(false);
+                }
+
+            case DeploymentSource.Dockerfile:
+                {
+                    await context.ReportProgressAsync(15, "Building image", ct).ConfigureAwait(false);
+                    using var workspace = Workspace.Create();
+                    await File.WriteAllTextAsync(
+                        Path.Combine(workspace.Path, "Dockerfile"), app.DockerfileContent!, ct).ConfigureAwait(false);
+
+                    return await BuildAsync(
+                        app, workspace.Path, "Dockerfile", deploymentId, labels, progress,
+                        await ResolveBaseAuthAsync(app.DockerfileContent, context, ct).ConfigureAwait(false),
                         ct).ConfigureAwait(false);
                 }
 
-                return await runtime.Images.PullAsync(image, progress, auth, ct).ConfigureAwait(false);
-            }
-
-            case DeploymentSource.Dockerfile:
-            {
-                await context.ReportProgressAsync(15, "Building image", ct).ConfigureAwait(false);
-                using var workspace = Workspace.Create();
-                await File.WriteAllTextAsync(
-                    Path.Combine(workspace.Path, "Dockerfile"), app.DockerfileContent!, ct).ConfigureAwait(false);
-
-                return await BuildAsync(
-                    app, workspace.Path, "Dockerfile", deploymentId, labels, progress,
-                    await ResolveBaseAuthAsync(app.DockerfileContent, context, ct).ConfigureAwait(false),
-                    ct).ConfigureAwait(false);
-            }
-
             case DeploymentSource.Git:
-            {
-                await context.ReportProgressAsync(10, "Cloning repository", ct).ConfigureAwait(false);
-                using var workspace = Workspace.Create();
-
-                var checkout = await git
-                    .CloneAsync(app.GitRepositoryUrl!, app.GitBranch, workspace.Path, ct)
-                    .ConfigureAwait(false);
-
-                await context.LogStepAsync(
-                    "clone", $"Checked out {checkout.CommitSha[..Math.Min(8, checkout.CommitSha.Length)]}", ct)
-                    .ConfigureAwait(false);
-
-                var dockerfile = BuildContextPaths.ResolveWithin(workspace.Path, app.DockerfilePath ?? "Dockerfile");
-
-                if (dockerfile.IsFailure)
                 {
-                    throw new InvalidOperationException(dockerfile.Failure!.Message);
+                    await context.ReportProgressAsync(10, "Cloning repository", ct).ConfigureAwait(false);
+                    using var workspace = Workspace.Create();
+
+                    var checkout = await git
+                        .CloneAsync(app.GitRepositoryUrl!, app.GitBranch, workspace.Path, ct)
+                        .ConfigureAwait(false);
+
+                    await context.LogStepAsync(
+                        "clone", $"Checked out {checkout.CommitSha[..Math.Min(8, checkout.CommitSha.Length)]}", ct)
+                        .ConfigureAwait(false);
+
+                    var dockerfile = BuildContextPaths.ResolveWithin(workspace.Path, app.DockerfilePath ?? "Dockerfile");
+
+                    if (dockerfile.IsFailure)
+                    {
+                        throw new InvalidOperationException(dockerfile.Failure!.Message);
+                    }
+
+                    if (!File.Exists(dockerfile.Value))
+                    {
+                        throw new InvalidOperationException(
+                            $"No Dockerfile at '{app.DockerfilePath ?? "Dockerfile"}' in the repository. "
+                            + "Airside builds from a Dockerfile and does not detect frameworks.");
+                    }
+
+                    await context.ReportProgressAsync(25, "Building image", ct).ConfigureAwait(false);
+
+                    return await BuildAsync(
+                        app, workspace.Path, app.DockerfilePath ?? "Dockerfile", deploymentId, labels, progress,
+                        await ResolveBaseAuthAsync(
+                            await File.ReadAllTextAsync(dockerfile.Value, ct).ConfigureAwait(false), context, ct)
+                            .ConfigureAwait(false),
+                        ct).ConfigureAwait(false);
                 }
-
-                if (!File.Exists(dockerfile.Value))
-                {
-                    throw new InvalidOperationException(
-                        $"No Dockerfile at '{app.DockerfilePath ?? "Dockerfile"}' in the repository. "
-                        + "Airside builds from a Dockerfile and does not detect frameworks.");
-                }
-
-                await context.ReportProgressAsync(25, "Building image", ct).ConfigureAwait(false);
-
-                return await BuildAsync(
-                    app, workspace.Path, app.DockerfilePath ?? "Dockerfile", deploymentId, labels, progress,
-                    await ResolveBaseAuthAsync(
-                        await File.ReadAllTextAsync(dockerfile.Value, ct).ConfigureAwait(false), context, ct)
-                        .ConfigureAwait(false),
-                    ct).ConfigureAwait(false);
-            }
 
             default:
                 throw new InvalidOperationException($"Unsupported deployment source {app.Source}.");

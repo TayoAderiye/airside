@@ -1,6 +1,6 @@
 using System.Net.Security;
-using System.Security.Authentication;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Airside.Core.Proxy;
 

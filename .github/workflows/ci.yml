@@ -49,6 +49,13 @@ jobs:
       - name: Restore tools
         run: dotnet tool restore
 
+      - name: Restore
+        # dotnet ef reads the project's assets file, so the projects have to be
+        # restored and not only the tool manifest — without this it fails with
+        # "Unable to retrieve project metadata", which reads like a malformed
+        # csproj rather than a missing restore.
+        run: dotnet restore
+
       - name: Postgres model is up to date
         run: |
           dotnet ef migrations has-pending-model-changes \
@@ -89,6 +96,15 @@ jobs:
         run: |
           # "Never build shell commands from user input" is held by there being no
           # shell at all. If one appears, it is a security review, not a refactor.
-          if grep -rnE '"(/bin/)?(ba)?sh"|"-c"|CMD-SHELL' --include='*.cs' src/; then
-            echo "A shell invocation appeared in C#. See CONVENTIONS.md §9."; exit 1
+          #
+          # Comment lines are excluded. The guard used to match the comment that
+          # explains why CMD-SHELL is not used — so the only way to make CI pass
+          # was to delete the explanation, which is precisely backwards.
+          offenders=$(grep -rnE '"(/bin/)?(ba)?sh"|"-c"|CMD-SHELL' --include='*.cs' src/ \
+            | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(///?|\*)' || true)
+
+          if [ -n "$offenders" ]; then
+            echo "A shell invocation appeared in C#. See CONVENTIONS.md §9."
+            echo "$offenders"
+            exit 1
           fi

@@ -2,10 +2,10 @@ using System.Net;
 using Airside.Core.Domains;
 using DnsClient;
 using DnsClient.Protocol;
-using CaaRecord = Airside.Core.Domains.CaaRecord;
-using DnsCaaRecord = DnsClient.Protocol.CaaRecord;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using CaaRecord = Airside.Core.Domains.CaaRecord;
+using DnsCaaRecord = DnsClient.Protocol.CaaRecord;
 
 namespace Airside.Runtime.Dns;
 
