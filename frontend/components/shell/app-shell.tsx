@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
-  const { loading, user } = useSession()
+  const { loading, user, unreachable, refresh } = useSession()
 
   useEffect(() => {
     if (!open) return
@@ -18,6 +18,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open])
+
+  // Checked before the loading state, because this one does not resolve on its
+  // own. Without it an operator whose API is down watches "Loading session…"
+  // indefinitely and has no way to tell that from a slow start — and with the
+  // dashboard in its own container, the API being absent while the UI serves
+  // perfectly well is an ordinary thing to happen, not an impossible one.
+  if (unreachable) {
+    return (
+      <div className="grid min-h-dvh place-items-center px-6">
+        <div className="max-w-md text-center">
+          <p className="font-display text-lg font-semibold text-foreground">
+            The API is not answering
+          </p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            The dashboard is running, but the Airside API behind it did not
+            respond. It may be restarting, or it may have stopped.
+          </p>
+          <pre className="mt-4 overflow-x-auto rounded-lg border border-border bg-card px-4 py-3 text-left font-mono text-xs text-foreground">
+            docker logs airside-api
+          </pre>
+          <button
+            type="button"
+            onClick={() => void refresh().catch(() => {})}
+            className="mt-4 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (loading || !user) {
     return <div className="grid min-h-dvh place-items-center text-sm text-muted-foreground">Loading session…</div>

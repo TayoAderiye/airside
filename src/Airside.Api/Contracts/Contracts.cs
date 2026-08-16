@@ -185,3 +185,22 @@ public sealed record SystemInfoDto(
     string InstanceName,
     bool RuntimeAvailable,
     DateTimeOffset StartedAt);
+
+/// <summary>
+/// The API's own version, for a dashboard checking whether it can talk to it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <strong>This shape is frozen.</strong> Fields may be added, because a reader
+/// that does not know about them ignores them. Nothing here may be renamed,
+/// removed, or have its type changed, ever.
+/// </para>
+/// <para>
+/// The reason is circular and worth stating plainly: the only consumer is a UI
+/// that suspects it is too old to understand this API. If the response it needs
+/// in order to find that out is itself part of what changed, it has no way to
+/// tell a version mismatch from a server that is simply broken — which is the
+/// one situation this endpoint exists to prevent.
+/// </para>
+/// </remarks>
+public sealed record VersionDto(string Version);

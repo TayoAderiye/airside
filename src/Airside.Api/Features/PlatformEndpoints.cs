@@ -63,8 +63,26 @@ internal static class PlatformEndpoints
             .WithTags("System")
             .RequireAuthorization();
 
+        // Anonymous on purpose. The dashboard ships as its own container and can
+        // be a different version from the API, so it checks compatibility before
+        // it renders anything — and it has to be able to do that while logged
+        // out, because the login screen is precisely what breaks when the
+        // contract has moved underneath it. Gating this behind authentication
+        // would mean the check only runs once it is too late to be useful.
+        //
+        // Nothing is disclosed that was not already public: /api/v1/setup/status
+        // is anonymous and returns the same version, and does a database read to
+        // do it, where this returns a string read once at startup.
+        app.MapGet("/api/v1/version", GetVersion)
+            .WithTags("System")
+            .AllowAnonymous();
+
         return app;
     }
+
+    /// <summary>The running API version. See <see cref="VersionDto"/> — the shape is frozen.</summary>
+    private static Ok<VersionDto> GetVersion() =>
+        TypedResults.Ok(new VersionDto(BuildInfo.Version));
 
     private static async Task<Ok<HostDto>> GetHostAsync(
         AirsideDbContext db,

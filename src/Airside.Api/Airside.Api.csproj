@@ -5,6 +5,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      So the tests can map an endpoint group and inspect what came out of it.
+      Route configuration is otherwise untestable from outside: whether a route
+      requires authentication is metadata attached at Map time, not a property of
+      any type the test assembly can reach.
+    -->
+    <InternalsVisibleTo Include="Airside.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="FluentValidation" />

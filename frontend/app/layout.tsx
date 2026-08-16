@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google'
+import { VersionGate } from '@/components/version-gate'
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from '@/lib/brand'
 import { SessionProvider } from '@/lib/session'
 import './globals.css'
@@ -52,7 +53,15 @@ export default function RootLayout({
           beacon firing from an administrator's browser is not something a
           self-hosted tool gets to do quietly.
         */}
-        <SessionProvider>{children}</SessionProvider>
+        {/*
+          Outside SessionProvider deliberately. The session logic redirects
+          between /setup, /login and /dashboard based on what the API says, and
+          none of those decisions are trustworthy if the two are different
+          versions — so compatibility is settled before any of it runs.
+        */}
+        <VersionGate>
+          <SessionProvider>{children}</SessionProvider>
+        </VersionGate>
       </body>
     </html>
   )
