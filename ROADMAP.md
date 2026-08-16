@@ -234,6 +234,44 @@ dashboard domain guarded by DNS verification before the switch plus
 
 ---
 
+## Notification dispatch — **done**
+
+Webhook, Slack, and email, each with its own severity threshold. Delivery is
+tracked per notification per channel so one failing channel does not re-send to
+one that succeeded, and dispatch runs apart from raising so a slow receiver
+cannot hold up the sweep that noticed the problem.
+
+Mostly an SSRF problem, and treated as one. See `docs/notifications.md`.
+
+**Verified against real receivers** — a webhook whose HMAC signature was
+recomputed independently in Python, SMTP through Mailpit, and a fan-out over six
+channels showing per-channel isolation, severity thresholds, retry on 500, and
+permanent failure on a refused address.
+
+### Found by running it
+
+- The escape hatch for private receivers was one switch for everything, so
+  enabling "I have an internal receiver" also re-opened `169.254.169.254` and
+  loopback. Neither is ever a legitimate webhook target; neither is behind the
+  switch now.
+- A refused destination was classified as a temporary network failure, because
+  `HttpClient` wraps whatever `ConnectCallback` throws. It retried five times and
+  muted the channel — a configuration mistake reported as an outage.
+- Unrelated, exposed by the same run: the first state-file write in the update
+  path sat outside its try block, so a read-only or full disk escaped as an
+  unhandled 500 with the update record left `Pending`.
+
+### Not built
+
+- No per-notification routing rules beyond severity — a channel cannot be told
+  "only certificates" or "only this application".
+- SMTP is not covered by the outbound address rules. An internal relay on a
+  private address is the normal arrangement, and an SMTP client cannot be turned
+  into a useful request against the metadata service or the proxy's admin API.
+  The reasoning is recorded rather than left implicit.
+
+---
+
 ## Private registries — **done**
 
 Deferred from Phase 4 and built last, since nothing before it needed a private
@@ -324,8 +362,8 @@ only symptom is users unable to log in with a code their phone says is correct.
 - The swap itself is prepared by the API and carried out by Docker Compose. The
   API cannot stop its own container mid-request and survive to report the result,
   so the outcome is reconciled from `state.json` at the next startup.
-- Notifications are raised and deduplicated but not delivered anywhere outside
-  the API. Email and webhook dispatch are not built.
+- ~~Notifications are raised and deduplicated but not delivered anywhere.~~
+  Delivered as of the notifications work below — webhook, Slack, and email.
 
 ---
 
