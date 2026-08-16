@@ -7,9 +7,9 @@ learning Kubernetes and without a monthly bill.
 Airside manages Docker on the host it runs on. It is not a cluster orchestrator,
 and it is not trying to become one.
 
-> **Status: 0.1.3, pre-release.** The code is complete through the roadmap and
-> heavily tested — but the installer has not yet been run end to end on a fresh
-> Linux host. See [Status](#status) before putting anything real on it.
+> **Status: 0.1.4, pre-release.** Complete through the roadmap, heavily tested,
+> and installed successfully on a fresh Linux host — which found four bugs that
+> are now fixed. Read [Status](#status) before putting anything real on it.
 
 ---
 
@@ -34,24 +34,90 @@ and it is not trying to become one.
 
 ## Install
 
-On a fresh Ubuntu or Debian host, as root:
+### What you need first
+
+| | |
+|---|---|
+| OS | Linux, x86-64 or arm64. Ubuntu 24.04 is what it is tested on. Airside manages a Linux host and refuses to run elsewhere. |
+| Memory | 2 GB. It runs in 1 GB with nothing deployed, but Postgres, the API, the dashboard and the proxy all have to fit. |
+| Disk | 20 GB. The four images plus a database volume do not fit comfortably in the 8 GB a cloud image usually defaults to. |
+| Ports | **80 and 443 reachable from the internet.** Port 80 is not optional — the certificate challenge uses it even for a site that only ever serves HTTPS. |
+| Access | Root, or a user with `sudo`. |
+
+If you are on EC2, put the instance in a **public** subnet with auto-assign public
+IP enabled. A private subnet gives you a box that cannot download Docker and that
+you cannot reach.
+
+### 1. Install
+
+As root, on the host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/TayoAderiye/airside/main/deploy/install.sh | sh
 ```
 
-The installer configures the Docker daemon, writes `/opt/airside`, and starts the
-control plane. It prints a one-time setup token on the console — that is how you
-create the first administrator.
+It installs Docker if absent, widens Docker's address pool (the default allows
+about fifteen networks, and Airside gives every workload its own), writes
+`/opt/airside`, creates `/var/lib/airside`, and starts four containers. Two to
+three minutes on a small instance, most of it pulling images.
 
-**Requirements**
+### 2. Take the setup token
 
-| | |
-|---|---|
-| OS | Linux, x86-64 or arm64. Airside manages a Linux host and will refuse to run elsewhere. |
-| Memory | 1 GB before any workload; 2 GB is a comfortable starting point. |
-| Ports | **80 and 443 open to the internet.** Port 80 is not optional — the ACME challenge uses it even for a site that only serves HTTPS. |
-| DNS | A domain with an A record pointing at the host, if you want real certificates. |
+The installer prints it. If it scrolled past:
+
+```bash
+sudo docker logs airside-api | grep -A4 "setup token"
+```
+
+It works once and expires in 24 hours.
+
+### 3. Reach the dashboard
+
+**Not over the public IP.** There is no certificate for a bare address — Let's
+Encrypt does not issue for IPs — so a password typed there crosses the network in
+clear text. Tunnel from your own machine instead:
+
+```bash
+ssh -i <your-key.pem> -L 8080:localhost:80 ubuntu@<host>
+```
+
+Leave it running and open `http://localhost:8080`.
+
+### 4. Create the administrator
+
+Paste the token, choose an email and password, name the instance. There is no
+default account: the first administrator is created here or not at all.
+
+### 5. Attach a domain
+
+This is the step that makes the tunnel unnecessary, and it is worth doing
+immediately.
+
+Point an `A` record at the host, then in **Settings → dashboard domain** type the
+hostname to confirm it. Airside runs pre-flight checks *before* switching — that
+the name resolves to this host, and that CAA records permit issuance — and
+refuses with the specific reason rather than letting the certificate request fail
+silently afterwards.
+
+Caddy then obtains the certificate over HTTP-01, which is why port 80 has to be
+open. Once a dashboard domain exists, the bare IP stops serving the dashboard.
+
+After that it is `https://your-domain`, no tunnel. The dashboard and the API
+share one hostname — Caddy routes `/api` to the API and everything else to the
+dashboard — so there is nothing separate to expose.
+
+### If it goes wrong
+
+```bash
+sudo docker compose -f /opt/airside/docker-compose.yml ps
+```
+
+```bash
+sudo docker logs airside-api --tail 50
+```
+
+The `airside` CLI on the host keeps working when the API does not — `airside
+status` reads the update state file directly.
 
 ## Security model, in plain terms
 
@@ -93,6 +159,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How it fits together, and why |
 | [docs/frontend-brief.md](docs/frontend-brief.md) | Building a UI against this API |
+| [docs/dashboard-wiring-plan.md](docs/dashboard-wiring-plan.md) | How the dashboard was connected, and what is left |
 | [docs/domains-and-tls.md](docs/domains-and-tls.md) | TLS modes, why issuance fails, cloud provider specifics |
 | [docs/notifications.md](docs/notifications.md) | Channels, routing rules, hours, webhook signatures |
 | [docs/image-variants.md](docs/image-variants.md) | Alpine vs Debian database images |
