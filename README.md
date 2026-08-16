@@ -33,7 +33,7 @@ and it is not trying to become one.
 On a fresh Ubuntu or Debian host, as root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tayoriye/airside/main/deploy/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/TayoAderiye/airside/main/deploy/install.sh | sh
 ```
 
 The installer configures the Docker daemon, writes `/opt/airside`, and starts the
@@ -123,7 +123,7 @@ Known gaps, recorded rather than hidden:
 ## Building from source
 
 ```bash
-git clone https://github.com/tayoriye/airside.git
+git clone https://github.com/TayoAderiye/airside.git
 cd airside
 dotnet test
 ```

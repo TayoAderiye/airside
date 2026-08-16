@@ -35,7 +35,7 @@ services:
       airside.kind: "system"
 
   airside-api:
-    image: ghcr.io/tayoriye/airside:${AIRSIDE_VERSION:?installer must pin an explicit tag}
+    image: ghcr.io/tayoaderiye/airside:${AIRSIDE_VERSION:?installer must pin an explicit tag}
     container_name: airside-api
     restart: unless-stopped
     depends_on:

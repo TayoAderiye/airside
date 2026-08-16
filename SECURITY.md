@@ -4,7 +4,7 @@
 
 Please report privately, not as a public issue.
 
-**Use [GitHub's private vulnerability reporting](https://github.com/tayoriye/airside/security/advisories/new)**
+**Use [GitHub's private vulnerability reporting](https://github.com/TayoAderiye/airside/security/advisories/new)**
 on this repository. If that is unavailable to you, email **tayoriye@gmail.com**
 with `AIRSIDE SECURITY` in the subject.
 

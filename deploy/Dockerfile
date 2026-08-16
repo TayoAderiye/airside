@@ -33,6 +33,6 @@ ENV ASPNETCORE_URLS=http://+:8080
 
 # Never :latest for the API. The updater rewrites an explicit tag, and a floating
 # tag would make "roll back to the previous version" meaningless.
-LABEL org.opencontainers.image.source="https://github.com/tayoriye/airside"
+LABEL org.opencontainers.image.source="https://github.com/TayoAderiye/airside"
 
 ENTRYPOINT ["dotnet", "Airside.Api.dll"]
