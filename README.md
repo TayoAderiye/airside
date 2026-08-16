@@ -7,7 +7,7 @@ learning Kubernetes and without a monthly bill.
 Airside manages Docker on the host it runs on. It is not a cluster orchestrator,
 and it is not trying to become one.
 
-> **Status: 0.1.1, pre-release.** The code is complete through the roadmap and
+> **Status: 0.1.2, pre-release.** The code is complete through the roadmap and
 > heavily tested — but the installer has not yet been run end to end on a fresh
 > Linux host. See [Status](#status) before putting anything real on it.
 
@@ -102,7 +102,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Status
 
-Everything on the roadmap is built, with 442 tests passing. Much of it has been
+Everything on the roadmap is built, with 452 tests passing. Much of it has been
 verified against real infrastructure rather than mocks — real Docker containers,
 a real Caddy, a real private registry, a real SMTP server, real DNS.
 

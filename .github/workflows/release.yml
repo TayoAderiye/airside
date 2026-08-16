@@ -253,27 +253,39 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ matrix.image }}-${{ steps.platform.outputs.pair }}
+          # Dots delimit the image name, and that is load-bearing rather than
+          # cosmetic. With hyphens these read digest-airside-linux-amd64 and
+          # digest-airside-ui-linux-amd64, so the glob digest-airside-* matches
+          # the dashboard's digests too — and the API's manifest is then built
+          # from a digest that does not exist in its repository. An image name
+          # cannot contain a dot, so digest.airside.* cannot reach
+          # digest.airside-ui.*.
+          name: digest.${{ matrix.image }}.${{ steps.platform.outputs.pair }}
           path: /tmp/digests/*
           retention-days: 1
 
+
   merge:
-    # The tags are created here, from both digests at once. Until this runs, the
-    # images exist in the registry but no tag points at them — so a failure in
-    # either architecture leaves the previous release untouched rather than
-    # publishing a tag that resolves on one platform and not the other.
+    # Every tag is created here, in one job rather than one job per image.
+    #
+    # As a matrix this could half-publish: the dashboard's manifest succeeded
+    # while the API's failed, leaving a release where airside-ui:0.1.1 existed
+    # and airside:0.1.1 did not. Nothing downstream can make sense of that pair,
+    # and it is the exact drift the two images check each other for.
+    #
+    # Until this runs the images exist in the registry with no tag pointing at
+    # them, so a failure in any architecture of any image leaves the previous
+    # release untouched.
     needs: [prepare, build]
-    strategy:
-      fail-fast: false
-      matrix:
-        image: ${{ fromJSON(needs.prepare.outputs.images) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digest-${{ matrix.image }}-*
-          merge-multiple: true
+          pattern: digest.*
+          # Not merged: each artifact keeps its own directory, so which digest
+          # belongs to which image stays legible rather than being inferred from
+          # a flat pile of filenames.
 
       - uses: docker/setup-buildx-action@v3
 
@@ -283,61 +295,98 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create the manifest list
-        working-directory: /tmp/digests
+      - name: Create the manifest lists
         run: |
-          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}"
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
 
-          # No ":latest". Airside's updater rewrites an explicit tag and rolls back
-          # by digest; a floating tag would make "the previous version" meaningless,
-          # and a routine restart could become an unplanned upgrade.
-          docker buildx imagetools create \
-            --tag "$image:${{ needs.prepare.outputs.version }}" \
-            $(printf "$image@sha256:%s " *)
+          for image in $(printf '%s' '${{ needs.prepare.outputs.images }}' | jq -r '.[]'); do
+            ref="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/$image"
+            refs=""
+
+            for file in /tmp/digests/digest."$image".*/*; do
+              [ -e "$file" ] || continue
+              refs="$refs $ref@sha256:$(basename "$file")"
+            done
+
+            # Loudly, rather than creating an empty or partial manifest. This is
+            # what a naming mistake looks like from here, and the previous one
+            # surfaced as "not found" against a digest from the other image.
+            [ -n "$refs" ] || { echo "no digests found for $image"; ls -R /tmp/digests; exit 1; }
+
+            # No ":latest". Airside's updater rewrites an explicit tag and rolls
+            # back by digest; a floating tag would make "the previous version"
+            # meaningless, and a routine restart could become an unplanned
+            # upgrade.
+            # shellcheck disable=SC2086
+            docker buildx imagetools create --tag "$ref:$version" $refs
+          done
 
       - name: Confirm both architectures are present
         run: |
-          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}"
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
 
-          docker buildx imagetools inspect "$image"
+          for image in $(printf '%s' '${{ needs.prepare.outputs.images }}' | jq -r '.[]'); do
+            ref="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/$image:$version"
 
-          # --raw, because the default format returns the index's own descriptor
-          # rather than its entries, so a per-architecture check against it always
-          # finds nothing and fails a release that actually published correctly.
-          #
-          # buildx also attaches attestation manifests carrying
-          # architecture "unknown"; those are expected and ignored.
-          raw=$(docker buildx imagetools inspect "$image" --raw)
+            docker buildx imagetools inspect "$ref"
 
-          for arch in amd64 arm64; do
-            echo "$raw" | grep -q "\"architecture\": *\"$arch\"" \
-              || { echo "$image has no linux/$arch entry"; echo "$raw"; exit 1; }
+            # --raw, because the default format returns the index's own
+            # descriptor rather than its entries, so a per-architecture check
+            # against it always finds nothing and fails a release that actually
+            # published correctly.
+            #
+            # buildx also attaches attestation manifests carrying architecture
+            # "unknown"; those are expected and ignored.
+            raw=$(docker buildx imagetools inspect "$ref" --raw)
+
+            for arch in amd64 arm64; do
+              echo "$raw" | grep -q "\"architecture\": *\"$arch\"" \
+                || { echo "$ref has no linux/$arch entry"; echo "$raw"; exit 1; }
+            done
+
+            echo "Published $ref for linux/amd64 and linux/arm64"
           done
 
-          echo "Published $image for linux/amd64 and linux/arm64"
-
-      - name: Confirm the image runs
+      - name: Confirm the images run
         # A published image that will not start is the worst possible release,
         # and the installer is the only other thing that would find out.
         run: |
-          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}"
+          set -euo pipefail
+          version="${{ needs.prepare.outputs.version }}"
+          owner="${{ needs.prepare.outputs.owner }}"
 
-          if [ "${{ matrix.image }}" = "airside" ]; then
-            docker run --rm --platform linux/amd64 --entrypoint dotnet "$image" Airside.Api.dll --version || true
-          else
-            # The dashboard has no --version flag, so it is started and asked for
-            # a page. This also catches the failure the Dockerfile exists to
-            # avoid: standalone output that never had .next/static copied into it
-            # starts perfectly well and serves unstyled HTML.
-            docker run -d --platform linux/amd64 --name ui-check -p 3000:3000 "$image"
+          for image in $(printf '%s' '${{ needs.prepare.outputs.images }}' | jq -r '.[]'); do
+            ref="${{ env.REGISTRY }}/$owner/$image:$version"
 
-            for _ in $(seq 1 30); do
-              if curl -sf -o /dev/null http://127.0.0.1:3000/login; then ready=1; break; fi
-              sleep 1
-            done
+            if [ "$image" = "airside" ]; then
+              # --health is the probe the compose healthcheck uses. With nothing
+              # listening it must exit non-zero, which proves the branch runs at
+              # all rather than falling through into starting a web server.
+              if docker run --rm --platform linux/amd64 "$ref" --health; then
+                echo "--health returned success with no server running"; exit 1
+              fi
 
-            docker logs ui-check
-            docker rm -f ui-check
+              echo "$ref: the health probe runs and reports unhealthy, as expected"
+            else
+              # The dashboard has no flag to call, so it is started and asked for
+              # a page. This also catches the failure its Dockerfile is shaped to
+              # avoid: standalone output that never had .next/static copied in
+              # starts perfectly well and serves unstyled HTML.
+              docker run -d --platform linux/amd64 --name ui-check -p 3000:3000 "$ref"
 
-            [ "${ready:-0}" = "1" ] || { echo "the dashboard did not serve /login"; exit 1; }
-          fi
+              ready=0
+              for _ in $(seq 1 30); do
+                if curl -sf -o /dev/null http://127.0.0.1:3000/login; then ready=1; break; fi
+                sleep 1
+              done
+
+              docker logs ui-check
+              docker rm -f ui-check
+
+              [ "$ready" = "1" ] || { echo "the dashboard did not serve /login"; exit 1; }
+
+              echo "$ref: serves /login"
+            fi
+          done
