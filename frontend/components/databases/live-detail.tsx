@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
+import { CredentialsPanel } from '@/components/databases/credentials-panel'
 import { QueryConsole } from '@/components/databases/query-console'
 import { JobWatcher } from '@/components/job-watcher'
 import { ProblemBanner } from '@/components/problem-banner'
@@ -100,6 +101,8 @@ export function LiveDatabaseDetail({ id }: { id: string }) {
       {error != null && <ProblemBanner error={error} />}
       <WarningsList warnings={db.warnings} />
       {job && <JobWatcher job={job} onDone={() => void load()} />}
+
+      <CredentialsPanel db={db} />
 
       <Panel title="Query">
         <QueryConsole db={summary} />

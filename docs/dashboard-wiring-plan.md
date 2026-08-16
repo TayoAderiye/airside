@@ -134,10 +134,15 @@ supports them, rather than shipping two more pages of invented data.
 ## Audit: what the API offers and the dashboard never asks for
 
 Phases 1 to 5 replaced every mocked screen. That is not the same as covering the
-API. Of 79 endpoints, **37 are never called**, and some of them are features the
+API. Of 79 endpoints, **31 are never called**, and some of them are features the
 README advertises on its front page.
 
 Ordered by how badly the absence hurts.
+
+> Counted by searching for each path in the source, including template-literal
+> forms. An earlier pass reported 37 by looking only inside `client.GET(...)`
+> calls, which missed paths passed as variables — database start, stop and
+> restart are wired that way and were wrongly listed as absent.
 
 ### A database you create cannot be used
 
@@ -172,11 +177,11 @@ disk and can roll back by digest — is never called. "Self-update with rollback
 is on the README's feature list. Upgrading means re-running `install.sh`, which
 does none of those things.
 
-### Databases have no lifecycle
+### Databases cannot be resized
 
-Applications can be started, stopped and restarted. Databases cannot:
-`/databases/{id}/start`, `/stop`, `/restart` and `/resize` are all unused, and
-the detail screen's only action is delete.
+Start, stop, restart and delete are all wired on the detail screen. `/resize` is
+not, so the only way to change a database's limits is to destroy it and provision
+another.
 
 ### Domains are half wired
 
