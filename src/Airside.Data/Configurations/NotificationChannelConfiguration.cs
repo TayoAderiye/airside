@@ -19,6 +19,7 @@ public class NotificationChannelConfiguration : IEntityTypeConfiguration<Notific
         builder.Property(x => x.LastAttemptError).HasMaxLength(512);
         builder.Property(x => x.SettingsJson).IsRequired();
         builder.Property(x => x.RoutingJson).IsRequired();
+        builder.Property(x => x.ScheduleJson).IsRequired();
 
         builder.HasIndex(x => x.Name).IsUnique();
         builder.HasQueryFilter(x => x.DeletedAt == null);

@@ -31,7 +31,8 @@ public sealed record SaveChannelRequest(
     string MinimumSeverity = "warning",
     bool Enabled = true,
     Dictionary<string, string>? Settings = null,
-    NotificationRoute? Routing = null);
+    NotificationRoute? Routing = null,
+    NotificationSchedule? Schedule = null);
 
 public sealed record ChannelDto(
     Guid Id,
@@ -47,7 +48,9 @@ public sealed record ChannelDto(
     int ConsecutiveFailures,
     DateTimeOffset? MutedUntil,
     IReadOnlyDictionary<string, string> Settings,
-    NotificationRoute Routing)
+    NotificationRoute Routing,
+    NotificationSchedule Schedule,
+    bool OpenNow)
 {
     public static ChannelDto From(NotificationChannel c)
     {
@@ -74,11 +77,22 @@ public sealed record ChannelDto(
             c.ConsecutiveFailures,
             c.MutedUntil is null ? null : new DateTimeOffset(c.MutedUntil.Value, TimeSpan.Zero),
             settings,
-            NotificationRoute.FromJson(c.RoutingJson));
+            NotificationRoute.FromJson(c.RoutingJson),
+            NotificationSchedule.FromJson(c.ScheduleJson),
+
+            // Shown because a channel that is configured, enabled, and asleep
+            // looks exactly like one that is broken.
+            NotificationScheduler.Evaluate(
+                NotificationSchedule.FromJson(c.ScheduleJson),
+                NotificationSeverityLevel.Error,
+                DateTimeOffset.UtcNow).IsOpen);
     }
 }
 
-public sealed record PreviewRouteRequest(NotificationRoute? Routing, string MinimumSeverity = "warning");
+public sealed record PreviewRouteRequest(
+    NotificationRoute? Routing,
+    string MinimumSeverity = "warning",
+    NotificationSchedule? Schedule = null);
 
 /// <param name="Warning">
 /// Set when the rule matched nothing at all — the one outcome that looks like a
@@ -88,7 +102,15 @@ public sealed record RoutePreviewDto(
     int Considered,
     int WouldSend,
     IReadOnlyList<RoutePreviewEntryDto> Notifications,
-    string? Warning);
+    string? Warning,
+    ScheduleSummaryDto? Schedule);
+
+/// <param name="NextOpensAt">
+/// Null when the channel is open. Answers "and when would I actually hear about
+/// it", which is the question a schedule raises and a match/no-match answer does
+/// not.
+/// </param>
+public sealed record ScheduleSummaryDto(bool OpenNow, DateTimeOffset? NextOpensAt, string? Detail);
 
 public sealed record RoutePreviewEntryDto(
     string Title,
@@ -236,6 +258,7 @@ internal static class ChannelEndpoints
         channel.Enabled = request.Enabled;
         channel.SettingsJson = JsonSerializer.Serialize(request.Settings ?? []);
         channel.RoutingJson = (request.Routing ?? NotificationRoute.All).ToJson();
+        channel.ScheduleJson = (request.Schedule ?? NotificationSchedule.Always).ToJson();
 
         if (!string.IsNullOrWhiteSpace(request.Secret))
         {
@@ -434,6 +457,9 @@ internal static class ChannelEndpoints
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
+        var schedule = request.Schedule ?? NotificationSchedule.Always;
+        var now = DateTimeOffset.UtcNow;
+
         var results = recent.ConvertAll(n =>
         {
             var decision = NotificationRouter.Evaluate(
@@ -444,13 +470,24 @@ internal static class ChannelEndpoints
                 n.ResourceKind,
                 n.ResourceId);
 
+            if (!decision.Matches)
+            {
+                return new RoutePreviewEntryDto(
+                    n.Title, n.Code, n.Severity.ToString().ToLowerInvariant(), n.ResourceKind,
+                    false, decision.Reason);
+            }
+
+            // Evaluated as if the notification had been raised now, which is what
+            // an operator setting up quiet hours is asking about.
+            var window = NotificationScheduler.Evaluate(schedule, ToLevel(n.Severity), now);
+
             return new RoutePreviewEntryDto(
                 n.Title,
                 n.Code,
                 n.Severity.ToString().ToLowerInvariant(),
                 n.ResourceKind,
-                decision.Matches,
-                decision.Reason);
+                window.IsOpen,
+                window.IsOpen ? null : window.Reason);
         });
 
         var matched = results.Count(r => r.WouldSend);
@@ -467,7 +504,17 @@ internal static class ChannelEndpoints
                 ? "This rule matches none of the last " + recent.Count + " notifications. That may be "
                   + "correct if you are filtering for something that has not happened yet — but check the "
                   + "codes above against what you meant to select."
-                : null));
+                : null,
+            schedule.IsAlwaysOpen
+                ? null
+                : Summarise(schedule, now)));
+    }
+
+    private static ScheduleSummaryDto Summarise(NotificationSchedule schedule, DateTimeOffset now)
+    {
+        var decision = NotificationScheduler.Evaluate(schedule, NotificationSeverityLevel.Error, now);
+
+        return new ScheduleSummaryDto(decision.IsOpen, decision.OpensAt, decision.Reason);
     }
 
     private static NotificationSeverityLevel ToLevel(NotificationSeverity severity) => severity switch

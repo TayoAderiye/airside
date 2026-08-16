@@ -65,6 +65,51 @@ The channel list carries the same idea at a larger scale: if **no enabled channe
 would receive an error**, it says so. Every channel can be individually sensible
 and still leave no path for the thing that matters.
 
+## Hours
+
+A channel can also be given hours. This is the on-call case: one channel for the
+working day, another for nights and weekends.
+
+```json
+{
+  "timeZone": "Europe/London",
+  "windows": [
+    { "days": ["Monday","Tuesday","Wednesday","Thursday","Friday"], "start": "18:00", "end": "09:00" },
+    { "days": ["Saturday","Sunday"], "start": "00:00", "end": "23:59" }
+  ],
+  "outside": "Defer",
+  "alwaysDeliverAtOrAbove": "Error"
+}
+```
+
+**The zone is an IANA identifier, not an offset.** An offset is right for half the
+year and an hour wrong for the other half, and the wrong half is the one nobody
+checks. Days and times are always the local ones: at 23:00 UTC on a Friday it is
+already Saturday in Sydney, and a schedule written there means Sydney's Saturday.
+
+**Windows may wrap midnight.** `18:00`–`09:00` is an overnight shift, and the day
+it is checked against is the day it *started* — so at 02:00 on Saturday, a Friday
+window still applies.
+
+### What happens outside the window
+
+- **`Defer`** — hold and send when the window opens. What "do not wake me" usually
+  means: the alert still arrives, just at a civilised hour.
+- **`Suppress`** — do not send at all. For a channel that is one half of a pair,
+  where deferring would deliver everything twice.
+
+A deferred notification that **resolves before its window opens is dropped**, not
+delivered. An alert arriving at nine to announce a problem fixed at four in the
+morning is worse than no alert.
+
+`alwaysDeliverAtOrAbove` lets a severity ignore the schedule entirely. It is a
+setting rather than a built-in rule, because a quiet-hours channel that pages
+anyway is a surprise, and one that silently holds a production outage until
+Monday is worse — whichever you meant, say so.
+
+The preview endpoint accepts a schedule too, and answers not just whether a
+notification would be sent but **when** it would arrive.
+
 ### Why a notification did not arrive
 
 Filtered notifications are recorded, not dropped. Each carries the reason —

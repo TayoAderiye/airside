@@ -1260,6 +1260,10 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                     b.Property<Guid>("RowVersion")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ScheduleJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SettingsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");

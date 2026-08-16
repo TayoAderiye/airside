@@ -265,7 +265,9 @@ permanent failure on a refused address.
 
 - ~~No per-notification routing rules beyond severity.~~ Added: include and
   exclude lists over codes, resource kinds, and specific resources, with a
-  preview endpoint and a warning when no channel would receive an error.
+  preview endpoint and a warning when no channel would receive an error. Time-of-day
+  routing followed: IANA-zoned windows that may wrap midnight, with `Defer` or
+  `Suppress` outside them and an optional severity that ignores the schedule.
 - SMTP is not covered by the outbound address rules. An internal relay on a
   private address is the normal arrangement, and an SMTP client cannot be turned
   into a useful request against the metadata service or the proxy's admin API.

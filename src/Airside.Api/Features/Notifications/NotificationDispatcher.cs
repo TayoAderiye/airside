@@ -172,14 +172,42 @@ public sealed class NotificationDispatcher(
                     notification.ResourceKind,
                     notification.ResourceId);
 
+                if (!decision.Matches)
+                {
+                    db.NotificationDeliveries.Add(new NotificationDelivery
+                    {
+                        Id = Guid.CreateVersion7(),
+                        NotificationId = notification.Id,
+                        ChannelId = channel.Id,
+                        Status = DeliveryStatus.Skipped,
+                        SkipReason = decision.Reason,
+                    });
+
+                    continue;
+                }
+
+                // The schedule is asked second, because "this channel is not about
+                // that" is a better answer than "this channel is asleep" when both
+                // are true.
+                var window = NotificationScheduler.Evaluate(
+                    NotificationSchedule.FromJson(channel.ScheduleJson),
+                    ToLevel(notification.Severity),
+                    timeProvider.GetUtcNow());
+
                 db.NotificationDeliveries.Add(new NotificationDelivery
                 {
                     Id = Guid.CreateVersion7(),
                     NotificationId = notification.Id,
                     ChannelId = channel.Id,
-                    Status = decision.Matches ? DeliveryStatus.Pending : DeliveryStatus.Skipped,
-                    NextAttemptAt = decision.Matches ? now : null,
-                    SkipReason = decision.Reason,
+
+                    // A deferred delivery stays Pending with a later due time, so
+                    // it rides the same retry machinery rather than needing a
+                    // second one.
+                    Status = window.IsOpen || window.OpensAt is not null
+                        ? DeliveryStatus.Pending
+                        : DeliveryStatus.Skipped,
+                    NextAttemptAt = window.IsOpen ? now : window.OpensAt?.UtcDateTime,
+                    SkipReason = window.IsOpen ? null : window.Reason,
                 });
             }
         }
@@ -230,6 +258,42 @@ public sealed class NotificationDispatcher(
                 delivery.NextAttemptAt = null;
                 continue;
             }
+
+            // A notification held overnight and fixed before morning should not
+            // arrive at nine o'clock announcing a problem that no longer exists.
+            // Only deferred deliveries are dropped this way: one that was already
+            // due is a genuine delivery attempt, and resolving mid-flight should
+            // not swallow it.
+            if (notification.ResolvedAt is not null && delivery.Attempts == 0 && delivery.LastAttemptAt is null)
+            {
+                delivery.Status = DeliveryStatus.Skipped;
+                delivery.NextAttemptAt = null;
+                delivery.SkipReason = "resolved before this channel's hours began";
+
+                continue;
+            }
+
+            // Re-checked rather than trusted from enqueue time, so an edited
+            // schedule takes effect on work already queued.
+            var window = NotificationScheduler.Evaluate(
+                NotificationSchedule.FromJson(channel.ScheduleJson),
+                ToLevel(notification.Severity),
+                timeProvider.GetUtcNow());
+
+            if (!window.IsOpen)
+            {
+                delivery.NextAttemptAt = window.OpensAt?.UtcDateTime;
+                delivery.SkipReason = window.Reason;
+
+                if (window.OpensAt is null)
+                {
+                    delivery.Status = DeliveryStatus.Skipped;
+                }
+
+                continue;
+            }
+
+            delivery.SkipReason = null;
 
             await AttemptAsync(db, delivery, channel, notification, settings, protector, ct).ConfigureAwait(false);
         }

@@ -219,6 +219,7 @@ public static class NotificationRouter
 /// Mirrors the persisted enum rather than referencing it, so the routing rules
 /// stay in <c>Airside.Core</c> and do not pull the data layer in behind them.
 /// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter<NotificationSeverityLevel>))]
 public enum NotificationSeverityLevel
 {
     Info,

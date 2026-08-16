@@ -54,6 +54,16 @@ public class NotificationChannel : Entity, ISoftDeletable
     /// </remarks>
     public string RoutingJson { get; set; } = "{}";
 
+    /// <summary>
+    /// When this channel accepts, as JSON. Empty means always.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="RoutingJson"/> because the two answer different
+    /// questions — what a channel is about, and when someone is willing to be
+    /// told. A channel commonly narrows one and not the other.
+    /// </remarks>
+    public string ScheduleJson { get; set; } = "{}";
+
     public DateTime? LastAttemptAt { get; set; }
 
     public bool? LastAttemptSucceeded { get; set; }
