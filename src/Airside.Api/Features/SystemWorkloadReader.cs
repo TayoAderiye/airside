@@ -111,13 +111,50 @@ internal sealed class SystemWorkloadReader(IContainerRuntime runtime)
     }
 
     /// <summary>
+    /// Every container name this reader will ever surface.
+    /// </summary>
+    /// <remarks>
+    /// The allowlist is what makes <see cref="ResolveContainerName"/> safe. It
+    /// maps ids to names by trying these four and nothing else, so no id an
+    /// attacker can construct resolves to a container of their choosing.
+    /// </remarks>
+    private static readonly string[] AllContainers =
+    [
+        AirsideLabels.SystemContainers.Api,
+        AirsideLabels.SystemContainers.Ui,
+        AirsideLabels.SystemContainers.Proxy,
+        AirsideLabels.SystemContainers.Database,
+    ];
+
+    /// <summary>
+    /// The container behind a synthesised id, or <c>null</c> if it is not one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Reading is not controlling. These ids match no row, and the original
+    /// intent was that every endpoint would therefore 404 — which is right for
+    /// stopping the API through the dashboard the API is serving, and wrong for
+    /// looking at its log. The result was four containers listed in the UI that
+    /// could not be clicked, inspected, or read, on the screen whose entire
+    /// purpose is watching what the host is doing.
+    /// </para>
+    /// <para>
+    /// So this exists, and only log streaming calls it. The lifecycle endpoints
+    /// go on looking their ids up in the database and finding nothing, so
+    /// nothing destructive became reachable by adding it.
+    /// </para>
+    /// </remarks>
+    public static string? ResolveContainerName(Guid id) =>
+        Array.Find(AllContainers, name => StableId(name) == id);
+
+    /// <summary>
     /// The same id for the same container name, every time.
     /// </summary>
     /// <remarks>
     /// A random id per request would make React lists reorder and re-render on
-    /// every poll. These ids intentionally match no row in any table, so the
-    /// detail and lifecycle endpoints answer 404 for them, which is the correct
-    /// answer: there is nothing there to show or to stop.
+    /// every poll. These ids match no row in any table, so the lifecycle
+    /// endpoints answer 404 for them, which is the correct answer: there is
+    /// nothing there to stop.
     /// </remarks>
     private static Guid StableId(string containerName)
     {

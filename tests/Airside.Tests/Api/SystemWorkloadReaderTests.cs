@@ -151,4 +151,72 @@ public sealed class SystemWorkloadReaderTests
         Assert.Equal(0, app.CpuNanos);
         Assert.Equal(0, app.MemoryBytes);
     }
+
+    [Fact]
+    public async Task EveryListedContainerCanBeResolvedBackToItsName()
+    {
+        // The ids the lists hand out have to be the ids the log stream accepts.
+        // Deriving them in two places is exactly how a container ends up
+        // listed in the UI and unreadable when clicked, which is the bug this
+        // pair of methods was added to fix.
+        var reader = new SystemWorkloadReader(RuntimeWith(
+            AirsideLabels.SystemContainers.Api,
+            AirsideLabels.SystemContainers.Ui,
+            AirsideLabels.SystemContainers.Proxy,
+            AirsideLabels.SystemContainers.Database));
+
+        foreach (var app in await reader.ApplicationsAsync(CancellationToken.None))
+        {
+            Assert.Equal(app.Slug, SystemWorkloadReader.ResolveContainerName(app.Id));
+        }
+
+        var store = Assert.Single(await reader.DatabasesAsync(CancellationToken.None));
+
+        Assert.Equal(store.Slug, SystemWorkloadReader.ResolveContainerName(store.Id));
+    }
+
+    [Fact]
+    public void AnIdThatIsNotOneOfAirsidesOwnResolvesToNothing()
+    {
+        // The whole safety of the reverse lookup is that it maps ids to an
+        // allowlist of four names rather than to whatever it is handed. A
+        // constructed id has to come back empty, or the log endpoint becomes a
+        // way to read any container on the host.
+        Assert.Null(SystemWorkloadReader.ResolveContainerName(Guid.CreateVersion7()));
+        Assert.Null(SystemWorkloadReader.ResolveContainerName(Guid.Empty));
+        Assert.Null(SystemWorkloadReader.ResolveContainerName(
+            new Guid("00000000-0000-0000-0000-0000000000ff")));
+    }
+
+    [Fact]
+    public async Task TheResolvedNameIsReportedEvenWhenTheContainerIsAbsent()
+    {
+        // Resolution is a pure id-to-name mapping and does not consult Docker.
+        // The caller checks whether the container exists, so a stopped API
+        // still resolves and the log endpoint answers about the container
+        // rather than pretending the id is unknown.
+        var reader = new SystemWorkloadReader(RuntimeWith(AirsideLabels.SystemContainers.Api));
+
+        var app = Assert.Single(await reader.ApplicationsAsync(CancellationToken.None));
+
+        Assert.Equal(
+            AirsideLabels.SystemContainers.Proxy,
+            SystemWorkloadReader.ResolveContainerName(
+                SystemWorkloadReaderTests.IdOf(AirsideLabels.SystemContainers.Proxy)));
+
+        Assert.NotEqual(app.Id, IdOf(AirsideLabels.SystemContainers.Proxy));
+    }
+
+    /// <summary>
+    /// The id the reader would emit for a container, obtained from the reader
+    /// rather than recomputed, so this cannot drift from the implementation.
+    /// </summary>
+    private static Guid IdOf(string containerName)
+    {
+        var reader = new SystemWorkloadReader(RuntimeWith(containerName));
+
+        return containerName == AirsideLabels.SystemContainers.Database
+            ? reader.DatabasesAsync(CancellationToken.None).GetAwaiter().GetResult()[0].Id
+            : reader.ApplicationsAsync(CancellationToken.None).GetAwaiter().GetResult()[0].Id;
+    }
 }

@@ -20,6 +20,7 @@ export function QueryView() {
   const [rows, setRows] = useState<Db[]>([])
   const [error, setError] = useState<unknown>(null)
   const [selectedId, setSelectedId] = useState<string | undefined>(params.get('db') ?? undefined)
+  const [hasSystemStore, setHasSystemStore] = useState(false)
 
   useEffect(() => {
     client
@@ -29,8 +30,10 @@ export function QueryView() {
         // against it would 404 — its id is synthesised and belongs to no row.
         // It holds every credential, session and audit entry on the host, and a
         // console pointed at it is not a feature Airside should offer.
-        const items = (r.data?.items ?? []).filter((d) => !d.isSystem)
+        const all = r.data?.items ?? []
+        const items = all.filter((d) => !d.isSystem)
 
+        setHasSystemStore(all.length > items.length)
         setRows(items)
         setSelectedId((id) => id ?? items[0]?.id)
       })
@@ -47,10 +50,17 @@ export function QueryView() {
       />
       {error != null && <ProblemBanner error={error} />}
       {rows.length === 0 || !selected ? (
+        // Saying "provision a database first" while the Databases screen shows
+        // one running reads as a broken page. The control-plane store is there,
+        // it is deliberately not queryable, and that is worth one sentence.
         <EmptyState
           icon={Database}
           title="No database to query"
-          description="Provision a database first. Query needs database.query."
+          description={
+            hasSystemStore
+              ? "Airside's own store is running, but it is not queryable here — it holds every credential, session and audit row on this host. Provision a database of your own to use this console."
+              : 'Provision a database first. Query needs database.query.'
+          }
         />
       ) : (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[240px_1fr]">

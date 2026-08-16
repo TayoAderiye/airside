@@ -26,7 +26,14 @@ internal static class RealtimeEndpoints
             .WithTags("Realtime")
             .RequireAuthorization();
 
+        // Both kinds, one handler. An operator watching the Monitoring screen is
+        // watching containers; which table the row came from is Airside's
+        // problem, not theirs.
         app.MapGet("/api/v1/databases/{id:guid}/logs/stream", StreamLogsAsync)
+            .WithTags("Realtime")
+            .RequirePermission(Permissions.LogsRead);
+
+        app.MapGet("/api/v1/applications/{id:guid}/logs/stream", StreamLogsAsync)
             .WithTags("Realtime")
             .RequirePermission(Permissions.LogsRead);
 
@@ -138,7 +145,8 @@ internal static class RealtimeEndpoints
     }
 
     /// <summary>
-    /// Container logs.
+    /// Container logs, for a database, an application, or one of Airside's own
+    /// containers.
     /// </summary>
     /// <remarks>
     /// Resume is the log timestamp, so a reconnect asks Docker for everything
@@ -154,12 +162,7 @@ internal static class RealtimeEndpoints
         CancellationToken ct,
         int tail = 200)
     {
-        var containerId = await db.Databases
-            .AsNoTracking()
-            .Where(d => d.Id == id)
-            .Select(d => d.ContainerId)
-            .FirstOrDefaultAsync(ct)
-            .ConfigureAwait(false);
+        var containerId = await ResolveContainerAsync(id, db, runtime, ct).ConfigureAwait(false);
 
         if (containerId is null)
         {
@@ -217,6 +220,53 @@ internal static class RealtimeEndpoints
     }
 
     private const int MaxLinesPerSecond = 2000;
+
+    /// <summary>
+    /// Finds the container behind a workload id, whichever kind it is.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Managed workloads carry their container id on the row. Airside's own
+    /// containers do not have a row at all — they are created by compose — so
+    /// they resolve through an allowlist of four names in
+    /// <see cref="SystemWorkloadReader"/>, and an id that matches none of them
+    /// resolves to nothing.
+    /// </para>
+    /// <para>
+    /// Soft-deleted workloads are excluded by the global query filter, so a
+    /// deleted application's log stream 404s rather than following a container
+    /// that is on its way out.
+    /// </para>
+    /// </remarks>
+    private static async Task<string?> ResolveContainerAsync(
+        Guid id,
+        AirsideDbContext db,
+        IContainerRuntime runtime,
+        CancellationToken ct)
+    {
+        var managed = await db.Workloads
+            .AsNoTracking()
+            .Where(w => w.Id == id)
+            .Select(w => w.ContainerId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (managed is not null)
+        {
+            return managed;
+        }
+
+        var systemName = SystemWorkloadReader.ResolveContainerName(id);
+
+        if (systemName is null)
+        {
+            return null;
+        }
+
+        var container = await runtime.Containers.FindAsync(systemName, ct).ConfigureAwait(false);
+
+        return container?.Id;
+    }
 
     /// <summary>
     /// Live resource usage, sampled per connection.

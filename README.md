@@ -7,7 +7,7 @@ learning Kubernetes and without a monthly bill.
 Airside manages Docker on the host it runs on. It is not a cluster orchestrator,
 and it is not trying to become one.
 
-> **Status: 0.1.7, pre-release.** Complete through the roadmap, heavily tested,
+> **Status: 0.1.8, pre-release.** Complete through the roadmap, heavily tested,
 > and now installed and driven on a real Linux host — which found twelve bugs,
 > all fixed, five of them capable of locking an operator out of the dashboard.
 > Read [Status](#status) before putting anything real on it.
@@ -189,7 +189,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Status
 
-Everything on the roadmap is built, with 488 tests passing. Much of it has been
+Everything on the roadmap is built, with 495 tests passing. Much of it has been
 verified against real infrastructure rather than mocks — real Docker containers,
 a real Caddy, a real private registry, a real SMTP server, real DNS.
 
@@ -221,6 +221,13 @@ factor as active, and the password alone would still have signed you in. It is
 enforced now — see [ROADMAP.md](ROADMAP.md) — but it is worth knowing that the
 whole feature was decorative until this release, in case you read an earlier
 version's endpoint list and drew a conclusion.
+
+0.1.8 came from the same place: an operator looking at the Monitoring screen and
+asking why it would not show a log. It would not show one for **any**
+application, or for any of Airside's own containers — the API had a stream for
+databases and nothing else, and the control-plane containers carried ids no
+endpoint would resolve. On a host with nothing provisioned yet, that was every
+row on the page.
 
 Two things about 0.1.7 specifically. A clean install of it has not been run end
 to end, only its parts. And the two-factor flow has not been driven through a

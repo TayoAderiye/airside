@@ -12,4 +12,7 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules
 .next/
-.DS_Storetsconfig.tsbuildinfo
+.DS_Store
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo

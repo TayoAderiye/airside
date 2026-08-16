@@ -61,7 +61,7 @@ So most of this work is calling things that exist, not building new machinery.
 | Monitoring | mock | `GET /api/v1/workloads/{id}/metrics` |
 | **Networks** | mock | **no API exists** |
 | **Secrets** | mock | **no API exists as a standalone concept** |
-| Log streaming | mock | `GET /api/v1/databases/{id}/logs/stream` (databases only) |
+| Log streaming | real | `GET /api/v1/{applications,databases}/{id}/logs/stream` |
 
 ## The four gaps
 
@@ -77,15 +77,17 @@ with a separate audited `/reveal`) and database credentials
 (`/databases/{id}/credentials`). The mock screen invents a concept the product
 does not have.
 
-**3. Applications have no live log stream.** Databases do
+**3. Applications have no live log stream.** ~~Databases do
 (`/databases/{id}/logs/stream`); applications only have
-`GET /api/v1/deployments/{id}/log`, which is a fetch, not a stream. Either the
-application log view is fetch-and-poll, or the API grows a stream to match.
+`GET /api/v1/deployments/{id}/log`, which is a fetch, not a stream.~~ **Resolved:**
+the API grew `/applications/{id}/logs/stream`, sharing the database handler.
+Deployment logs remain a separate fetch, which is right — they are the record of
+one build, not the container's current output.
 
-**4. System containers are not exposed.** `deploy/docker-compose.yml` claims they
-"are visible in the UI". Nothing implements that — no endpoint lists them and no
-screen shows them. Either build it or correct the comment; the comment is wrong
-today either way.
+**4. System containers are not exposed.** ~~`deploy/docker-compose.yml` claims
+they "are visible in the UI". Nothing implements that.~~ **Resolved:** listed by
+`SystemWorkloadReader`, and since 0.1.8 their logs are readable too. They remain
+uncontrollable — see the Monitoring note below.
 
 ## Order of work
 
@@ -134,7 +136,7 @@ supports them, rather than shipping two more pages of invented data.
 ## Audit: what the API offers and the dashboard never asks for
 
 Phases 1 to 5 replaced every mocked screen. That is not the same as covering the
-API. Of 79 endpoints, **21 are never called**, and some of them are features the
+API. Of 80 endpoints, **21 are never called**, and some of them are features the
 README advertises on its front page.
 
 Ordered by how badly the absence hurts.
@@ -180,6 +182,19 @@ secret, so a hosted chart API is out of the question and a transitive dependency
 on that page is a supply chain ending at the second factor. It is checked by
 rendering every symbol and reading it back with independent decoders, not by
 looking at one that worked — see `lib/qr.verify.mjs`.
+
+**Monitoring actually monitors.** It listed every workload and could stream
+almost none of them: the API had a log stream for databases and nothing for
+applications, and Airside's own four containers carried synthesised ids that no
+endpoint would resolve, so the page answered "read this on the host" for them.
+On a host with no database provisioned, that was every row.
+
+Applications now have `/logs/stream`, and system ids resolve to their container
+through a four-name allowlist used by log streaming only. The lifecycle
+endpoints still look those ids up in the database and still find nothing, so
+stopping the API through the dashboard the API is serving remains unreachable —
+the property was that reads and writes were both blocked, and only the reads
+needed opening.
 
 ### Self-update is unreachable
 

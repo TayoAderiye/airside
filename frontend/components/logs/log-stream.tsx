@@ -8,11 +8,12 @@ import { cn } from '@/lib/utils'
 type Line = { timestamp: string; stream: 'stdout' | 'stderr'; text: string }
 
 /**
- * A database's container log, live.
+ * A container log, live, for a workload of either kind.
  *
- * Only databases have one. The API exposes /api/v1/databases/{id}/logs/stream
- * and nothing equivalent for applications, so this component takes a database
- * id rather than a workload of any kind — a name it could not honour.
+ * This took a database id until applications got a stream of their own, because
+ * databases were the only kind that had one — which meant the Monitoring screen
+ * answered "no live log" for every application on the host, and for Airside's
+ * own containers, which is most of what is listed there.
  *
  * What this replaced generated plausible lines on a timer: a payments API
  * serving charges, retrying webhooks against hooks.acme.io, and reporting slow
@@ -20,10 +21,12 @@ type Line = { timestamp: string; stream: 'stdout' | 'stderr'; text: string }
  * what made it dangerous on a screen an operator reads to decide something.
  */
 export function LogStream({
-  databaseId,
+  kind,
+  id,
   height = '24rem',
 }: {
-  databaseId: string
+  kind: 'application' | 'database'
+  id: string
   height?: string
 }) {
   const [lines, setLines] = useState<Line[]>([])
@@ -39,7 +42,7 @@ export function LogStream({
     setLines([])
     setClosed(null)
 
-    const source = new EventSource(`/api/v1/databases/${databaseId}/logs/stream`, { withCredentials: true })
+    const source = new EventSource(`/api/v1/${kind}s/${id}/logs/stream`, { withCredentials: true })
 
     source.addEventListener('log.line', (ev: MessageEvent<string>) => {
       if (pausedRef.current) return
@@ -70,7 +73,7 @@ export function LogStream({
     source.onerror = () => setClosed((prev) => prev ?? 'disconnected')
 
     return () => source.close()
-  }, [databaseId])
+  }, [kind, id])
 
   useEffect(() => {
     if (!paused && box.current) {

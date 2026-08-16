@@ -564,6 +564,45 @@ way a phone computes them were accepted by the server's validator.
 
 ---
 
+## Monitoring that monitors — **done**
+
+Reported as three separate complaints, which turned out to be one decision.
+
+`SystemWorkloadReader` synthesises ids for Airside's own four containers, and its
+own comment explained why that was good: *"their ids exist nowhere in the
+database, so every action endpoint looks them up, finds nothing, and returns 404
+without a single guard having to be remembered."*
+
+That is right for **stopping the API through the dashboard the API is serving**.
+It was applied to reads as well, and reads are not control. The result was four
+containers listed on three screens that could not be clicked, opened, or read.
+
+Compounding it, applications had no live log stream at all — only databases did.
+So Monitoring, whose entire purpose is watching what the host is doing, refused
+for every application *and* every control-plane container. On a host with no
+database provisioned, it refused for everything on the page and suggested ssh.
+
+- **Applications now have `/logs/stream`**, sharing the database handler. One
+  resolver looks a workload id up in `Workloads`, so soft-deleted rows stay
+  excluded by the existing query filter.
+- **System ids resolve to their container** through an allowlist of exactly four
+  names, used by log streaming and nothing else. An id an attacker constructs
+  matches none of them, and there is a test that says so.
+- **The lifecycle endpoints are untouched.** They still look ids up in the
+  database and still find nothing, so nothing destructive became reachable.
+- The list screens link system rows to their log rather than rendering a row that
+  looks clickable and is not.
+- The Query console said "provision a database first" while the Databases screen
+  showed one running. It now says the control-plane store exists, is deliberately
+  not queryable, and why.
+
+The general lesson, recorded because it will recur: *unreachable by construction*
+is a fine security property and a poor UI default. It is worth stating which
+operations it is protecting, because "no row matches this id" silently covers
+reads that were never dangerous.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

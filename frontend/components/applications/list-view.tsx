@@ -53,10 +53,10 @@ export function ApplicationsList() {
       ) : (
         <ul className="flex flex-col gap-3">
           {apps.map((app) => {
-            // Airside's own containers. Deliberately not a link: they have no
-            // detail page, no deployment history and no lifecycle Airside owns,
-            // and a row that looks clickable would lead somewhere that does not
-            // exist. Nothing here offers to stop the API serving this page.
+            // Airside's own containers. No detail page and no lifecycle Airside
+            // owns — nothing here offers to stop the API serving this page — but
+            // the log is readable, and offering nothing at all left four rows on
+            // this screen that an operator could look at and not act on.
             if (app.isSystem) {
               return (
                 <li key={app.id}>
@@ -72,6 +72,12 @@ export function ApplicationsList() {
                         {app.slug} · port {app.containerPort} · managed by the installer, not by Airside
                       </p>
                     </div>
+                    <Link
+                      href={`/monitoring?workload=${app.id}`}
+                      className="font-mono text-xs text-primary hover:underline"
+                    >
+                      View log
+                    </Link>
                     <StatusBadge state={apiState(app.state)} />
                   </div>
                 </li>

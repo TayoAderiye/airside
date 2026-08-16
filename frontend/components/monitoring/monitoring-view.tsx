@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { Database, Loader2, Rocket } from 'lucide-react'
 
 import { PageHeader, Panel } from '@/components/ui/panel'
@@ -21,31 +21,17 @@ type Source = {
   /**
    * Airside's own containers.
    *
-   * They appear here because they are running on this host and an operator
-   * wants to see them, but nothing about them can be fetched by id: the ids are
-   * synthesised and match no row, so the log stream answers 404 and a detail
-   * link leads nowhere. Both were reachable before this flag existed.
+   * Their ids are synthesised and match no row, so nothing that reads a table
+   * can find them — no detail page, no lifecycle action. The log stream
+   * resolves them through a name allowlist instead, so they are readable here
+   * while staying unstoppable from the dashboard they are serving.
    */
   isSystem: boolean
 }
 
-/** The display names come back friendly; `docker logs` needs the container. */
-function containerNameFor(displayName: string) {
-  switch (displayName) {
-    case 'Airside API':
-      return 'airside-api'
-    case 'Airside dashboard':
-      return 'airside-ui'
-    case 'Airside proxy':
-      return 'airside-proxy'
-    case 'Airside store':
-      return 'airside-db'
-    default:
-      return displayName
-  }
-}
-
 export function MonitoringView() {
+  const params = useSearchParams()
+  const requested = params.get('workload')
   const [sources, setSources] = useState<Source[] | null>(null)
   const [selected, setSelected] = useState<Source | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -76,9 +62,9 @@ export function MonitoringView() {
 
         setSources(list)
 
-        // Defaults to something that can actually stream, so the panel is not
-        // empty on arrival and does not open on a 404.
-        setSelected(list.find((s) => s.kind === 'database' && !s.isSystem) ?? list[0] ?? null)
+        // Honours ?workload= so the "View log" links on the list screens land
+        // on the right row rather than on whatever happens to be first.
+        setSelected(list.find((s) => s.id === requested) ?? list[0] ?? null)
       })
       .catch((err) => {
         if (cancelled) return
@@ -89,7 +75,7 @@ export function MonitoringView() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [requested])
 
   if (sources === null) {
     return (
@@ -104,7 +90,7 @@ export function MonitoringView() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Monitoring"
-        description="Live container output. Databases stream; application logs are per deployment."
+        description="Live container output from every workload on this host, including Airside's own."
       />
 
       {error != null && <ProblemBanner error={error} />}
@@ -143,44 +129,26 @@ export function MonitoringView() {
           )}
         </Panel>
 
-        <Panel title={selected ? `Live log — ${selected.name}` : 'Live log'} bodyClassName="p-0">
+        <Panel
+          title={selected ? `Live log — ${selected.name}` : 'Live log'}
+          description={
+            selected?.isSystem
+              ? 'Part of Airside itself. Readable here; startable and stoppable only on the host.'
+              : undefined
+          }
+          bodyClassName="p-0"
+        >
           {!selected ? (
             <p className="p-4 text-sm text-muted-foreground">Select a workload.</p>
-          ) : selected.isSystem ? (
-            // Airside's own containers. Their ids are synthesised, so the log
-            // stream 404s and there is no detail page to link to — and Airside
-            // streaming its own API's log through its own API is a loop worth
-            // not building. The host has a better tool for it.
-            <div className="p-4">
-              <p className="text-sm text-foreground">This is part of Airside itself.</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Control-plane logs are read on the host, where they survive the control plane being the thing that
-                is broken.
-              </p>
-              <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-foreground">
-                docker logs {selected.name.startsWith('Airside') ? containerNameFor(selected.name) : selected.name} --tail 50
-              </pre>
-            </div>
-          ) : selected.kind === 'database' ? (
-            <LogStream databaseId={selected.id} height="30rem" />
           ) : (
-            // Said plainly rather than shown as an empty stream. The API has a
-            // log stream for databases and none for applications; an
-            // application's output is captured per deployment instead.
-            <div className="p-4">
-              <p className="text-sm text-foreground">Applications have no live log stream yet.</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Their output is recorded against each deployment.
-              </p>
-              <Link
-                href={`/applications/${selected.id}`}
-                className="mt-3 inline-block font-mono text-xs text-primary hover:underline"
-              >
-                Open {selected.name}
-              </Link>
-            </div>
+            // Every workload, Airside's own included. This used to refuse for
+            // system containers and for all applications, which between them
+            // was everything on a host with no database — a monitoring screen
+            // that monitored nothing and told you to use ssh.
+            <LogStream kind={selected.kind} id={selected.id} height="30rem" />
           )}
         </Panel>
+
       </div>
     </div>
   )

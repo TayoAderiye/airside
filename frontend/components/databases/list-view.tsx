@@ -52,9 +52,11 @@ export function DatabasesList() {
       ) : (
         <ul className="flex flex-col gap-3">
           {rows.map((db) => {
-            // The control-plane store. No detail page, and no query console —
-            // this is the database holding every credential and audit row on the
-            // host, and a console pointed at it is not a feature.
+            // The control-plane store. No detail page and no query console: this
+            // is the database holding every credential, session and audit row on
+            // the host, and a console pointed at it is not a feature. Its log is
+            // fair game, and used to be the one thing on this row that looked
+            // clickable and was not.
             if (db.isSystem) {
               return (
                 <li
@@ -69,9 +71,15 @@ export function DatabasesList() {
                       </span>
                     </p>
                     <p className="font-mono text-xs text-muted-foreground">
-                      {db.engine} {db.version} · Airside&apos;s own store
+                      {db.engine} {db.version} · Airside&apos;s own store · not queryable
                     </p>
                   </div>
+                  <Link
+                    href={`/monitoring?workload=${db.id}`}
+                    className="font-mono text-xs text-primary hover:underline"
+                  >
+                    View log
+                  </Link>
                   <StatusBadge state={apiState(db.state)} />
                 </li>
               )
