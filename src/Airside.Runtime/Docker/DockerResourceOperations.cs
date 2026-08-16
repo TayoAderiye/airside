@@ -8,9 +8,29 @@ namespace Airside.Runtime.Docker;
 
 internal sealed class DockerImageOperations(DD.IDockerClient client) : IImageOperations
 {
+    /// <summary>
+    /// Maps a credential onto Docker's auth structure.
+    /// </summary>
+    /// <remarks>
+    /// The secret is revealed here and nowhere earlier. Everything upstream — the
+    /// store, the resolver, the job payload — carries it as a <see cref="Secret"/>,
+    /// so the only place a registry token exists as a plain string is the moment
+    /// it is handed to the daemon.
+    /// </remarks>
+    private static DM.AuthConfig? ToAuthConfig(RegistryAuth? auth) =>
+        auth is null
+            ? null
+            : new DM.AuthConfig
+            {
+                ServerAddress = auth.Registry,
+                Username = auth.Username,
+                Password = auth.Password.Reveal(),
+            };
+
     public async Task<ImageSummary> PullAsync(
         ImageReference image,
         IProgress<string>? progress,
+        RegistryAuth? auth,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(image);
@@ -19,7 +39,7 @@ internal sealed class DockerImageOperations(DD.IDockerClient client) : IImageOpe
         {
             await client.Images.CreateImageAsync(
                 new DM.ImagesCreateParameters { FromImage = image.Repository, Tag = image.Digest ?? image.Tag },
-                authConfig: null,
+                ToAuthConfig(auth),
                 new Progress<DM.JSONMessage>(m => progress?.Report(m.Status ?? m.ProgressMessage ?? string.Empty)),
                 ct).ConfigureAwait(false);
 
@@ -28,6 +48,34 @@ internal sealed class DockerImageOperations(DD.IDockerClient client) : IImageOpe
         }
         catch (DD.DockerApiException ex)
         {
+            // An authorization failure is not "Docker is unreachable", and the
+            // generic message sends the operator to check the daemon while the
+            // real problem is a missing or expired registry credential. The
+            // registry reports it as 401/403, and containerd's resolver phrases it
+            // as "pull access denied" alongside "repository does not exist" — so
+            // the same response covers both a private image and a typo, and the
+            // message has to say so rather than pick one.
+            var unauthorized = ex.StatusCode is System.Net.HttpStatusCode.Unauthorized
+                    or System.Net.HttpStatusCode.Forbidden
+                || ex.Message.Contains("authoriz", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("authentication required", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("access denied", StringComparison.OrdinalIgnoreCase);
+
+            if (unauthorized)
+            {
+                var registry = RegistryHost.Of(image);
+
+                throw new RegistryAuthenticationException(
+                    auth is null
+                        ? $"The registry {registry} refused the pull of {image} and no credential is stored "
+                          + $"for it. If the image is private, add a credential for {registry}; if it is "
+                          + "public, check the repository and tag."
+                        : $"The registry {registry} refused the pull of {image} using the stored credential "
+                          + $"for '{auth.Username}'. The token may have expired, or it may not grant pull "
+                          + "access to this repository.",
+                    ex);
+            }
+
             throw new ContainerRuntimeException($"Could not pull image {image}.", ex);
         }
     }
@@ -35,6 +83,7 @@ internal sealed class DockerImageOperations(DD.IDockerClient client) : IImageOpe
     public async Task<ImageSummary> BuildAsync(
         ImageBuildRequest request,
         IProgress<string>? progress,
+        RegistryAuth? auth,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -61,7 +110,11 @@ internal sealed class DockerImageOperations(DD.IDockerClient client) : IImageOpe
                         StringComparer.Ordinal),
                 },
                 context,
-                authConfigs: null,
+                // The daemon matches on ServerAddress when it pulls whatever the
+                // Dockerfile's FROM names. A build against a private base image
+                // otherwise fails at that pull, reporting a missing image rather
+                // than a missing credential.
+                authConfigs: auth is null ? null : [ToAuthConfig(auth)!],
                 headers: null,
                 new Progress<DM.JSONMessage>(m => progress?.Report(m.Stream ?? m.Status ?? string.Empty)),
                 ct).ConfigureAwait(false);

@@ -117,6 +117,8 @@ comments, and `KEYS` in every form.
 `DatabaseAttachment`, `GitCredential`, `RegistryCredential`; migration
 `0004_Applications` ×2.
 
+`RegistryCredential` landed after Phase 6 — see **Private registries** below.
+
 **`Airside.Runtime`** — `GitCloner`; `ImageBuilder`; `DeploymentOrchestrator`
 (build → create → health-check → swap → stop old); `EnvironmentRenderer` (merges
 manual entries with attachment-injected ones at deploy time); job handlers
@@ -229,6 +231,46 @@ dashboard domain guarded by DNS verification before the switch plus
 - Deleting an application with domains attached is unguarded because
   `application.delete` does not exist yet. It must block or release the domains
   when that endpoint lands, or it will orphan routes.
+
+---
+
+## Private registries — **done**
+
+Deferred from Phase 4 and built last, since nothing before it needed a private
+image.
+
+Credentials are keyed by registry host rather than attached to a workload: one
+token for `ghcr.io` covers every image on it, and per-application copies are how
+one ends up stale and rotated separately. Stored encrypted, masked in every
+response, revealed only through an audited endpoint.
+
+They reach every pull — application deployments, database images (a Postgres
+carrying pgvector usually lives somewhere private), the base image of a
+Dockerfile build, and Airside's own image, since an organisation mirroring it
+internally is normal and the control plane should not be the one thing that
+cannot update from where it is published.
+
+**Verified against a real private registry** — `registry:2` with htpasswd auth,
+holding an image the daemon genuinely could not pull anonymously. Deploying
+failed without a credential, succeeded with one, and the token appeared zero
+times in the API log, in job steps, and anywhere in the database as plaintext.
+
+### Found by running it
+
+A pull refused for want of a credential reported **"The container runtime is
+unreachable. Check that Docker is running."** Docker was fine. The dispatcher
+mapped every `ContainerRuntimeException` to that message, so the one failure most
+likely to be an authorisation problem sent the operator to check the daemon. It
+now names the registry, says whether a credential was even tried, and — because
+registries answer a private image and a typo identically — says both are
+possible rather than picking one.
+
+### Known limit
+
+A multi-stage build pulling private base images from **two different** registries
+gets a credential for the first only. Threading a list through the whole call
+chain to serve that shape is not yet worth the surface; the single-registry case
+is the one people have.
 
 ---
 

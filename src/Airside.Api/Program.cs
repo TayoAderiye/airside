@@ -8,6 +8,7 @@ using Airside.Runtime.Operations;
 using Airside.Core.Naming;
 using Airside.Core.Operations;
 using Airside.Api.Features.Operations;
+using Airside.Api.Features.Registries;
 using Airside.Runtime.Domains;
 using Airside.Runtime.Dns;
 using Airside.Core.Domains;
@@ -195,6 +196,8 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<ISystemBackupProvider, SystemBackupProvider>();
 builder.Services.AddSingleton<UpdateOrchestrator>();
 builder.Services.AddHostedService<MetricSampler>();
+builder.Services.AddScoped<RegistryCredentialStore>();
+builder.Services.AddScoped<IRegistryCredentialSource>(sp => sp.GetRequiredService<RegistryCredentialStore>());
 builder.Services.Configure<CaddyOptions>(builder.Configuration.GetSection(CaddyOptions.Section));
 builder.Services.AddHostedService<ProxyReconciliationService>();
 builder.Services.AddHostedService<HostDiscoveryService>();
@@ -282,6 +285,7 @@ app.MapDomainEndpoints();
 app.MapDomainMoveEndpoints();
 app.MapOperationsEndpoints();
 app.MapMfaEndpoints();
+app.MapRegistryEndpoints();
 app.MapDashboardDomainEndpoints();
 
 app.MapRealtimeEndpoints();

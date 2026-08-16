@@ -182,6 +182,18 @@ public sealed class JobDispatcherService(
             job.ErrorCode = result.Failure!.Code;
             job.ErrorMessage = result.Failure.Message;
         }
+        catch (RegistryAuthenticationException ex)
+        {
+            // Before the general runtime failure, because it is a subclass and the
+            // generic message — "check that Docker is running" — is exactly wrong
+            // here. Docker is fine; the thing to fix is a registry credential, and
+            // the exception already carries a message that says which registry and
+            // whether one was even tried.
+            logger.LogError(ex, "Job {JobId} ({JobType}) was refused by a registry", job.Id, job.Type);
+            job.ErrorCode = "registry.unauthorized";
+            job.ErrorMessage = ex.Message;
+            job.ErrorDetail = ex.ToString();
+        }
         catch (ContainerRuntimeException ex)
         {
             // The commonest real failure: the Docker daemon is down, restarting,

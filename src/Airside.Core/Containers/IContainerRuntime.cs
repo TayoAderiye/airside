@@ -99,14 +99,26 @@ public interface IContainerOperations
 
 public interface IImageOperations
 {
+    /// <param name="auth">
+    /// Null for a public registry. Supplied per call rather than configured once,
+    /// because a host can pull from several registries and the credential that
+    /// matches is decided by the image being pulled.
+    /// </param>
     Task<ImageSummary> PullAsync(
         ImageReference image,
         IProgress<string>? progress,
+        RegistryAuth? auth,
         CancellationToken ct);
 
+    /// <param name="auth">
+    /// Credentials for the registry the Dockerfile's base image comes from. A
+    /// build whose <c>FROM</c> names a private image fails at the pull step
+    /// otherwise, reporting a missing image rather than a missing credential.
+    /// </param>
     Task<ImageSummary> BuildAsync(
         ImageBuildRequest request,
         IProgress<string>? progress,
+        RegistryAuth? auth,
         CancellationToken ct);
 
     /// <summary>Returns null when the image is not present locally.</summary>

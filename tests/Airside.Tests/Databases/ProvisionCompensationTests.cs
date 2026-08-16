@@ -28,7 +28,8 @@ public class ProvisionCompensationTests
         var registry = new FakeEngineRegistry();
 
         var handler = new DatabaseProvisionHandler(
-            runtime, registry, store, NullLogger<DatabaseProvisionHandler>.Instance);
+            runtime, registry, store, new NoRegistryCredentials(),
+            NullLogger<DatabaseProvisionHandler>.Instance);
 
         return (handler, runtime, new FakeJobContext(new DatabaseProvisionPayload(store.Snapshot.Id)), store);
     }
@@ -170,6 +171,13 @@ public class ProvisionCompensationTests
 }
 
 /// <summary>A job context that records progress, steps, and tracked resources in memory.</summary>
+/// <summary>No stored credentials, which is the normal case for a public image.</summary>
+public sealed class NoRegistryCredentials : IRegistryCredentialSource
+{
+    public Task<RegistryAuth?> ResolveAsync(ImageReference image, CancellationToken ct) =>
+        Task.FromResult<RegistryAuth?>(null);
+}
+
 public sealed class FakeJobContext(object payload) : IJobContext
 {
     private readonly List<TrackedResource> _tracked = [];

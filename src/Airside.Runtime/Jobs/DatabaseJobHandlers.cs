@@ -93,6 +93,7 @@ public sealed class DatabaseProvisionHandler(
     IContainerRuntime runtime,
     IDatabaseEngineRegistry engines,
     IDatabaseWorkloadStore store,
+    IRegistryCredentialSource registries,
     ILogger<DatabaseProvisionHandler> logger) : IJobHandler
 {
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromMinutes(5);
@@ -116,8 +117,14 @@ public sealed class DatabaseProvisionHandler(
         await context.ReportProgressAsync(5, "Pulling image", ct).ConfigureAwait(false);
 
         var image = ResolveImage(workload, engine);
+
+        // Official engine images are public, but a custom image is the whole
+        // reason the override exists — a Postgres carrying pgvector very often
+        // lives on a private registry.
+        var auth = await registries.ResolveAsync(image, ct).ConfigureAwait(false);
+
         var pulled = await runtime.Images
-            .PullAsync(image, new Progress<string>(_ => { }), ct)
+            .PullAsync(image, new Progress<string>(_ => { }), auth, ct)
             .ConfigureAwait(false);
 
         await context.LogStepAsync("pull", $"Pulled {image} ({pulled.Digest})", ct).ConfigureAwait(false);

@@ -118,6 +118,7 @@ public sealed class DeployHandler(
     IApplicationStore store,
     GitSource git,
     Core.Proxy.IProxyManager proxy,
+    IRegistryCredentialSource registries,
     ILogger<DeployHandler> logger) : IJobHandler
 {
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromMinutes(5);
@@ -306,10 +307,25 @@ public sealed class DeployHandler(
             }
 
             case DeploymentSource.Image:
+            {
                 await context.ReportProgressAsync(15, "Pulling image", ct).ConfigureAwait(false);
-                return await runtime.Images
-                    .PullAsync(ImageReference.Parse(app.ImageRef!), progress, ct)
-                    .ConfigureAwait(false);
+
+                var image = ImageReference.Parse(app.ImageRef!);
+                var auth = await registries.ResolveAsync(image, ct).ConfigureAwait(false);
+
+                if (auth is not null)
+                {
+                    // Named in the log, because a pull that fails on a private
+                    // registry otherwise reports a missing image and sends the
+                    // operator looking for a typo in the tag.
+                    await context.LogStepAsync(
+                        "pull",
+                        $"Using the stored credential for {auth.Registry} (user {auth.Username}).",
+                        ct).ConfigureAwait(false);
+                }
+
+                return await runtime.Images.PullAsync(image, progress, auth, ct).ConfigureAwait(false);
+            }
 
             case DeploymentSource.Dockerfile:
             {
@@ -318,8 +334,10 @@ public sealed class DeployHandler(
                 await File.WriteAllTextAsync(
                     Path.Combine(workspace.Path, "Dockerfile"), app.DockerfileContent!, ct).ConfigureAwait(false);
 
-                return await BuildAsync(app, workspace.Path, "Dockerfile", deploymentId, labels, progress, ct)
-                    .ConfigureAwait(false);
+                return await BuildAsync(
+                    app, workspace.Path, "Dockerfile", deploymentId, labels, progress,
+                    await ResolveBaseAuthAsync(app.DockerfileContent, context, ct).ConfigureAwait(false),
+                    ct).ConfigureAwait(false);
             }
 
             case DeploymentSource.Git:
@@ -352,13 +370,50 @@ public sealed class DeployHandler(
                 await context.ReportProgressAsync(25, "Building image", ct).ConfigureAwait(false);
 
                 return await BuildAsync(
-                    app, workspace.Path, app.DockerfilePath ?? "Dockerfile", deploymentId, labels, progress, ct)
-                    .ConfigureAwait(false);
+                    app, workspace.Path, app.DockerfilePath ?? "Dockerfile", deploymentId, labels, progress,
+                    await ResolveBaseAuthAsync(
+                        await File.ReadAllTextAsync(dockerfile.Value, ct).ConfigureAwait(false), context, ct)
+                        .ConfigureAwait(false),
+                    ct).ConfigureAwait(false);
             }
 
             default:
                 throw new InvalidOperationException($"Unsupported deployment source {app.Source}.");
         }
+    }
+
+    /// <summary>
+    /// Finds a credential for the first base image that has one.
+    /// </summary>
+    /// <remarks>
+    /// One credential, not one per stage. A multi-stage build pulling private
+    /// images from two different registries would need both, and this passes only
+    /// the first — a real limitation, and a rare enough shape that carrying a list
+    /// through the whole call chain to serve it is not yet worth the surface.
+    /// </remarks>
+    private async Task<RegistryAuth?> ResolveBaseAuthAsync(
+        string? dockerfile,
+        IJobContext context,
+        CancellationToken ct)
+    {
+        foreach (var image in BaseImages.Parse(dockerfile))
+        {
+            var auth = await registries.ResolveAsync(image, ct).ConfigureAwait(false);
+
+            if (auth is null)
+            {
+                continue;
+            }
+
+            await context.LogStepAsync(
+                "build",
+                $"Using the stored credential for {auth.Registry} to pull the base image {image}.",
+                ct).ConfigureAwait(false);
+
+            return auth;
+        }
+
+        return null;
     }
 
     private Task<ImageSummary> BuildAsync(
@@ -368,6 +423,7 @@ public sealed class DeployHandler(
         Guid deploymentId,
         IReadOnlyDictionary<string, string> labels,
         IProgress<string> progress,
+        RegistryAuth? auth,
         CancellationToken ct) =>
         runtime.Images.BuildAsync(
             new ImageBuildRequest(
@@ -379,6 +435,7 @@ public sealed class DeployHandler(
                 new ImageReference($"airside/{app.Slug.Value}", AirsideNames.ShortId(deploymentId)),
                 labels),
             progress,
+            auth,
             ct);
 
     private async Task<string> CreateContainerAsync(

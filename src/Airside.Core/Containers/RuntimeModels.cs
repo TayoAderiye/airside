@@ -172,7 +172,7 @@ public sealed record RuntimeInfo(
 /// expected value would drown the failures that callers can actually act on.
 /// Services translate this into <c>runtime.unavailable</c>.
 /// </remarks>
-public sealed class ContainerRuntimeException : Exception
+public class ContainerRuntimeException : Exception
 {
     public ContainerRuntimeException()
     {

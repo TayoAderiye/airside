@@ -156,14 +156,27 @@ internal sealed class FakeContainerOperations(FakeContainerRuntime parent) : ICo
 
 internal sealed class FakeImageOperations : IImageOperations
 {
-    public Task<ImageSummary> PullAsync(ImageReference image, IProgress<string>? progress, CancellationToken ct)
+    /// <summary>The credential each pull was given, so tests can assert one was resolved.</summary>
+    public List<RegistryAuth?> PullAuth { get; } = [];
+
+    public Task<ImageSummary> PullAsync(
+        ImageReference image,
+        IProgress<string>? progress,
+        RegistryAuth? auth,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(image);
+        PullAuth.Add(auth);
+
         return Task.FromResult(new ImageSummary(
             "img", "sha256:pulled", [image.ToString()], 1024, DateTimeOffset.UnixEpoch));
     }
 
-    public Task<ImageSummary> BuildAsync(ImageBuildRequest request, IProgress<string>? progress, CancellationToken ct) =>
+    public Task<ImageSummary> BuildAsync(
+        ImageBuildRequest request,
+        IProgress<string>? progress,
+        RegistryAuth? auth,
+        CancellationToken ct) =>
         throw new NotSupportedException();
 
     public Task<ImageSummary?> FindAsync(ImageReference image, CancellationToken ct) =>

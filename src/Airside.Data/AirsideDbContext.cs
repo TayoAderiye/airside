@@ -77,6 +77,8 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
 
     public DbSet<UserMfa> UserMfa => Set<UserMfa>();
 
+    public DbSet<RegistryCredential> RegistryCredentials => Set<RegistryCredential>();
+
     public DbSet<Backup> Backups => Set<Backup>();
 
     public DbSet<Restore> Restores => Set<Restore>();

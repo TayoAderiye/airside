@@ -124,8 +124,19 @@ public sealed class UpdateOrchestrator(
             state = state with { Step = UpdateStep.Pulling, UpdatedAt = timeProvider.GetUtcNow() };
             await WriteStateAsync(state, ct).ConfigureAwait(false);
 
+            var target = new ImageReference(options.ImageRepository, targetVersion);
+
+            // Airside's own image can live on a private registry — an
+            // organisation mirroring it internally is a normal arrangement, and
+            // without this the control plane would be the one thing that could
+            // not be updated from where it is published.
+            var auth = await scope.ServiceProvider
+                .GetRequiredService<IRegistryCredentialSource>()
+                .ResolveAsync(target, ct)
+                .ConfigureAwait(false);
+
             var image = await runtime.Images
-                .PullAsync(new ImageReference(options.ImageRepository, targetVersion), null, ct)
+                .PullAsync(target, null, auth, ct)
                 .ConfigureAwait(false);
 
             record.ToImageDigest = image.Digest;
