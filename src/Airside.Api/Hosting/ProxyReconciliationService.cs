@@ -1,6 +1,9 @@
+using Airside.Core.Containers;
 using Airside.Core.Domains;
+using Airside.Core.Naming;
 using Airside.Core.Proxy;
 using Airside.Runtime.Jobs;
+using Airside.Runtime.Proxy;
 
 namespace Airside.Api.Hosting;
 
@@ -36,6 +39,7 @@ namespace Airside.Api.Hosting;
 public sealed class ProxyReconciliationService(
     IServiceScopeFactory scopeFactory,
     IProxyManager proxy,
+    IContainerRuntime runtime,
     TimeProvider timeProvider,
     ILogger<ProxyReconciliationService> logger) : BackgroundService
 {
@@ -73,6 +77,10 @@ public sealed class ProxyReconciliationService(
             var actual = await proxy.ListAllRoutesAsync(ct).ConfigureAwait(false);
 
             var routable = wanted.Where(d => d.CurrentContainerName is not null).ToList();
+
+            // Before any route is asserted. A route naming an upstream the proxy
+            // has no network path to resolves to nothing and returns 502.
+            await AttachNetworksAsync(routable, ct).ConfigureAwait(false);
 
             foreach (var domain in routable)
             {
@@ -113,12 +121,13 @@ public sealed class ProxyReconciliationService(
                     domain.Hostname, upstream.ContainerName);
             }
 
-            // The skip list has to match the set of non-Automatic domains exactly.
-            // A hostname left on it after being switched back to Automatic would
-            // never get a certificate, with nothing to explain why.
-            var skip = await store.ListAutomaticHttpsSkipAsync(ct).ConfigureAwait(false);
-            await proxy.SetAutomaticHttpsSkipAsync(skip, ct).ConfigureAwait(false);
+            // The policy has to match the set of non-Automatic domains exactly. A
+            // hostname left on a skip list after being switched back to Automatic
+            // would never get a certificate, with nothing to explain why.
+            var policy = await store.GetTlsPolicyAsync(ct).ConfigureAwait(false);
+            await proxy.ApplyTlsPolicyAsync(policy, ct).ConfigureAwait(false);
 
+            await ReloadCertificatesAsync(store, wanted, ct).ConfigureAwait(false);
             await RemoveOrphansAsync(actual, routable, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -131,6 +140,101 @@ public sealed class ProxyReconciliationService(
             logger.LogError(ex, "Proxy reconciliation failed; routes may be stale until the next pass");
         }
 #pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// Rejoins the proxy to every application network it needs to reach.
+    /// </summary>
+    /// <remarks>
+    /// Network attachments belong to a container, not to a name, so a replaced
+    /// proxy comes back on the internal network and nothing else. Its routes are
+    /// then reasserted perfectly and every one of them returns 502, because
+    /// Airside's isolation is pairwise and the new container has no path to any
+    /// application. Attaching is idempotent, so re-checking each pass is cheap and
+    /// covers a deployment that created a network after the last one.
+    /// </remarks>
+    private async Task AttachNetworksAsync(List<DomainTarget> domains, CancellationToken ct)
+    {
+        if (domains.Count == 0)
+        {
+            return;
+        }
+
+        var container = await runtime.Containers
+            .FindAsync(AirsideLabels.SystemContainers.Proxy, ct)
+            .ConfigureAwait(false);
+
+        if (container is null)
+        {
+            return;
+        }
+
+        foreach (var network in domains
+            .Select(d => d.ApplicationNetworkName)
+            .Distinct(StringComparer.Ordinal))
+        {
+            if (container.Networks.Contains(network, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            await runtime.Networks.ConnectAsync(network, container.Id, ct).ConfigureAwait(false);
+
+            logger.LogInformation("Reattached the proxy to {Network}", network);
+        }
+    }
+
+    /// <summary>
+    /// Puts uploaded certificates back into the proxy after it has been replaced.
+    /// </summary>
+    /// <remarks>
+    /// An uploaded certificate lives only in Caddy's memory, so a replaced
+    /// container comes back without it. That is the worst of the three states to
+    /// be left in: the route is reasserted and the hostname is on
+    /// <c>skip_certificates</c>, so Caddy has been told not to obtain a
+    /// certificate and has none to serve. The site answers nothing at all on 443,
+    /// and no log line connects that to a proxy restart twenty minutes earlier.
+    /// </remarks>
+    private async Task ReloadCertificatesAsync(
+        IDomainStore store,
+        IReadOnlyList<DomainTarget> domains,
+        CancellationToken ct)
+    {
+        var manual = domains.Where(d => d.TlsMode == TlsMode.Manual).ToList();
+
+        if (manual.Count == 0)
+        {
+            return;
+        }
+
+        var loaded = await proxy.ListLoadedCertificateIdsAsync(ct).ConfigureAwait(false);
+
+        foreach (var domain in manual)
+        {
+            var id = CaddyProxyManager.CertificateTag(domain.Hostname);
+
+            if (loaded.Contains(id, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            var certificate = await store.GetManualCertificateAsync(domain.DomainId, ct).ConfigureAwait(false);
+
+            if (certificate is null)
+            {
+                logger.LogWarning(
+                    "{Hostname} is set to Manual TLS but has no stored certificate, so nothing can be "
+                    + "served for it. Upload one.",
+                    domain.Hostname);
+
+                continue;
+            }
+
+            await proxy.LoadCertificateAsync(certificate, ct).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Reloaded the uploaded certificate for {Hostname} into the proxy", domain.Hostname);
+        }
     }
 
     /// <summary>

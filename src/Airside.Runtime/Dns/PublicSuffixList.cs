@@ -147,10 +147,25 @@ public sealed class PublicSuffixList : IPublicSuffixList
 
         display = hostname.Trim().TrimEnd('.').ToLowerInvariant();
 
+        // A leading "*." is set aside before IDN mapping and put back after.
+        // IdnMapping rejects the asterisk outright, which would make a wildcard
+        // fail as "not a valid hostname" — burying the message that actually helps
+        // (that wildcards need DNS-01, or an uploaded certificate) behind a syntax
+        // error that says nothing about wildcards at all.
+        var wildcard = display.StartsWith("*.", StringComparison.Ordinal);
+        var bare = wildcard ? display[2..] : display;
+
+        if (bare.Length == 0)
+        {
+            return false;
+        }
+
         try
         {
-            punycode = new IdnMapping { AllowUnassigned = false, UseStd3AsciiRules = true }
-                .GetAscii(display);
+            var ascii = new IdnMapping { AllowUnassigned = false, UseStd3AsciiRules = true }
+                .GetAscii(bare);
+
+            punycode = wildcard ? "*." + ascii : ascii;
 
             return true;
         }

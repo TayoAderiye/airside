@@ -60,15 +60,27 @@ public interface IProxyManager
     Task UnloadCertificateAsync(string hostname, CancellationToken ct);
 
     /// <summary>
-    /// Sets the hostnames Caddy must not attempt automatic HTTPS for.
+    /// The ids of certificates Caddy currently holds.
+    /// </summary>
+    /// <remarks>
+    /// Reconciliation needs this because an uploaded certificate lives only in the
+    /// proxy's memory. A replaced proxy container comes back with its routes
+    /// reasserted and its skip list correct — and no certificate, so a Manual
+    /// hostname is told not to obtain one and has none to serve. Nothing on 443,
+    /// and nothing in any log to say why.
+    /// </remarks>
+    Task<IReadOnlyList<string>> ListLoadedCertificateIdsAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Tells Caddy how to treat each non-Automatic hostname.
     /// </summary>
     /// <remarks>
     /// Automatic HTTPS is opt-out in Caddy, so a hostname configured for manual,
-    /// external, or internal TLS still gets an ACME attempt unless it appears
+    /// external, or internal TLS still gets an ACME attempt unless it is named
     /// here. Two issuers racing over one hostname burns quota and produces
     /// certificates that flap.
     /// </remarks>
-    Task SetAutomaticHttpsSkipAsync(IReadOnlyCollection<string> hostnames, CancellationToken ct);
+    Task ApplyTlsPolicyAsync(TlsPolicySet policy, CancellationToken ct);
 
     /// <summary>
     /// Reads certificate state. Caddy is the source of truth; Airside caches this
@@ -155,6 +167,40 @@ public sealed record HstsPolicy(int MaxAgeSeconds, bool IncludeSubdomains, bool 
 /// cannot leak it.
 /// </param>
 public sealed record ManualCertificate(string Hostname, string CertificateChainPem, Secret PrivateKeyPem);
+
+/// <summary>
+/// How Caddy should treat each hostname that is not <see cref="TlsMode.Automatic"/>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Three lists rather than one, because Caddy's two skip settings mean genuinely
+/// different things and using the wrong one produces a hostname that answers
+/// nothing on 443. This was found by serving a real request, not by reading the
+/// documentation:
+/// </para>
+/// <para>
+/// <see cref="SkipEntirely"/> maps to <c>skip</c>, which turns automatic HTTPS off
+/// altogether — no certificate management, no redirect, and <b>no TLS listener for
+/// that host</b>. Right for <see cref="TlsMode.External"/>, where something in
+/// front has already terminated TLS and this server should serve plain HTTP.
+/// </para>
+/// <para>
+/// <see cref="SkipCertificates"/> maps to <c>skip_certificates</c>, which keeps
+/// HTTPS switched on and only stops Caddy trying to obtain a certificate. Right
+/// for <see cref="TlsMode.Manual"/>, where a certificate has been uploaded and
+/// Caddy still has to terminate the connection with it. Using <c>skip</c> here
+/// loads the certificate correctly and then never serves it.
+/// </para>
+/// <para>
+/// <see cref="Internal"/> is not a skip at all: it is an automation policy naming
+/// Caddy's own local CA as the issuer, so certificates are still managed — just
+/// not by a public authority.
+/// </para>
+/// </remarks>
+public sealed record TlsPolicySet(
+    IReadOnlyCollection<string> SkipEntirely,
+    IReadOnlyCollection<string> SkipCertificates,
+    IReadOnlyCollection<string> Internal);
 
 public sealed record CertificateStatus(
     string Hostname,

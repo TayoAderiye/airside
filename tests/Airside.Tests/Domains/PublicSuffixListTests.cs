@@ -82,9 +82,20 @@ public class PublicSuffixListTests
     }
 
     [Fact]
+    public void AWildcardNormalisesSoTheWildcardSpecificMessageCanBeReached()
+    {
+        // IdnMapping rejects the asterisk, so without special handling a wildcard
+        // fails as "not a valid hostname" and the user never sees the advice that
+        // wildcards need DNS-01 or an uploaded certificate.
+        Assert.True(PublicSuffixList.TryNormalise("*.Example.COM", out var punycode, out _));
+        Assert.Equal("*.example.com", punycode);
+    }
+
+    [Fact]
     public void NormalisationRejectsRatherThanRepairs()
     {
         Assert.False(PublicSuffixList.TryNormalise("exa mple.com", out _, out _));
         Assert.False(PublicSuffixList.TryNormalise("  ", out _, out _));
+        Assert.False(PublicSuffixList.TryNormalise("*.", out _, out _));
     }
 }

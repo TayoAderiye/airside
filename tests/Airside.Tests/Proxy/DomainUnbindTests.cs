@@ -64,8 +64,8 @@ public class DomainUnbindTests
         public Task RecordStatusAsync(Guid domainId, DomainStatus status, CancellationToken ct) =>
             Task.CompletedTask;
 
-        public Task<IReadOnlyList<string>> ListAutomaticHttpsSkipAsync(CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<TlsPolicySet> GetTlsPolicyAsync(CancellationToken ct) =>
+            Task.FromResult(new TlsPolicySet([], [], []));
 
         public Task<ManualCertificate?> GetManualCertificateAsync(Guid domainId, CancellationToken ct) =>
             Task.FromResult<ManualCertificate?>(null);
@@ -103,8 +103,10 @@ public class DomainUnbindTests
 
         public Task UnloadCertificateAsync(string hostname, CancellationToken ct) => Task.CompletedTask;
 
-        public Task SetAutomaticHttpsSkipAsync(IReadOnlyCollection<string> hostnames, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task ApplyTlsPolicyAsync(TlsPolicySet policy, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<string>> ListLoadedCertificateIdsAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
 
         public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(true);
     }

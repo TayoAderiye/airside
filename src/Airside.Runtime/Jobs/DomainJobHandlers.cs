@@ -53,8 +53,8 @@ public interface IDomainStore
     /// <summary>Every live domain, for reconciling the proxy back to the database.</summary>
     Task<IReadOnlyList<DomainTarget>> ListLiveAsync(CancellationToken ct);
 
-    /// <summary>Hostnames Caddy must not attempt automatic HTTPS for — everything not Automatic.</summary>
-    Task<IReadOnlyList<string>> ListAutomaticHttpsSkipAsync(CancellationToken ct);
+    /// <summary>How Caddy should treat every hostname that is not Automatic.</summary>
+    Task<TlsPolicySet> GetTlsPolicyAsync(CancellationToken ct);
 
     /// <summary>Reads back a stored certificate for loading into the proxy.</summary>
     Task<ManualCertificate?> GetManualCertificateAsync(Guid domainId, CancellationToken ct);
@@ -292,8 +292,8 @@ public sealed class BindDomainHandler(
 
     private async Task ApplySkipListAsync(CancellationToken ct)
     {
-        var skip = await store.ListAutomaticHttpsSkipAsync(ct).ConfigureAwait(false);
-        await proxy.SetAutomaticHttpsSkipAsync(skip, ct).ConfigureAwait(false);
+        var policy = await store.GetTlsPolicyAsync(ct).ConfigureAwait(false);
+        await proxy.ApplyTlsPolicyAsync(policy, ct).ConfigureAwait(false);
     }
 
     private static string CaddyRouteId(string hostname) =>
@@ -358,8 +358,8 @@ public sealed class UnbindDomainHandler(
             // The skip list is rebuilt from what remains, so a hostname that has
             // gone stops being skipped. Leaving it there would silently suppress
             // automatic HTTPS if the same name were added again later.
-            var skip = await store.ListAutomaticHttpsSkipAsync(ct).ConfigureAwait(false);
-            await proxy.SetAutomaticHttpsSkipAsync(skip, ct).ConfigureAwait(false);
+            var policy = await store.GetTlsPolicyAsync(ct).ConfigureAwait(false);
+            await proxy.ApplyTlsPolicyAsync(policy, ct).ConfigureAwait(false);
         }
 
         // The proxy is deliberately left attached to the application's network.

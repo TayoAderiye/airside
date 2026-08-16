@@ -139,21 +139,51 @@ public class RouteShapeTests
     }
 
     [Fact]
-    public async Task TheSkipListIsWrittenWholesaleAsync()
+    public async Task ManualAndExternalUseDifferentSkipSettingsAsync()
     {
-        // Whole-list, not incremental. A hostname left on the list after being
-        // switched back to Automatic would never get a certificate, and nothing
-        // would explain why.
-        var (proxy, handler) = Build((HttpStatusCode.OK, "{}"));
+        // Verified by serving a real request, not read from documentation. Caddy's
+        // "skip" turns HTTPS off for a host entirely — no TLS listener at all —
+        // while "skip_certificates" keeps TLS on and only stops it fetching a
+        // certificate. Putting a Manual hostname in the first list loads the
+        // uploaded certificate perfectly and then serves nothing on 443.
+        var (proxy, handler) = Build(
+            (HttpStatusCode.OK, "{}"),
+            (HttpStatusCode.OK, "{}"),
+            (HttpStatusCode.OK, "{}"));
 
-        await proxy.SetAutomaticHttpsSkipAsync(["a.example.com", "b.example.com"], CancellationToken.None);
+        await proxy.ApplyTlsPolicyAsync(
+            new TlsPolicySet(["ext.example.com"], ["manual.example.com"], ["internal.example.com"]),
+            CancellationToken.None);
 
-        var request = Assert.Single(handler.Requests);
+        var automatic = handler.Requests.Find(r => r.Path.EndsWith("automatic_https", StringComparison.Ordinal));
+        Assert.NotNull(automatic);
 
-        Assert.Equal("/config/apps/http/servers/airside/automatic_https", request.Path);
+        var body = JsonDocument.Parse(automatic!.Body!).RootElement;
 
-        var skip = JsonDocument.Parse(request.Body!).RootElement.GetProperty("skip");
-        Assert.Equal(2, skip.GetArrayLength());
+        Assert.Equal("ext.example.com", body.GetProperty("skip")[0].GetString());
+        Assert.Equal("manual.example.com", body.GetProperty("skip_certificates")[0].GetString());
+    }
+
+    [Fact]
+    public async Task InternalUsesAnIssuerPolicyRatherThanASkipAsync()
+    {
+        // Internal is not a skip at all: certificates are still managed, just by
+        // Caddy's own local CA rather than a public authority.
+        var (proxy, handler) = Build(
+            (HttpStatusCode.OK, "{}"),
+            (HttpStatusCode.OK, "{}"),
+            (HttpStatusCode.OK, "{}"));
+
+        await proxy.ApplyTlsPolicyAsync(
+            new TlsPolicySet([], [], ["internal.example.com"]), CancellationToken.None);
+
+        var automation = handler.Requests.Find(r => r.Path == "/config/apps/tls/automation");
+        Assert.NotNull(automation);
+
+        var policy = JsonDocument.Parse(automation!.Body!).RootElement.GetProperty("policies")[0];
+
+        Assert.Equal("internal.example.com", policy.GetProperty("subjects")[0].GetString());
+        Assert.Equal("internal", policy.GetProperty("issuers")[0].GetProperty("module").GetString());
     }
 
     [Fact]

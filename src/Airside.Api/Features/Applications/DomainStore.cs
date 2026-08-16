@@ -70,13 +70,30 @@ internal sealed class DomainStore(
         ];
     }
 
-    public async Task<IReadOnlyList<string>> ListAutomaticHttpsSkipAsync(CancellationToken ct) =>
-        await db.Domains
+    /// <summary>
+    /// Groups the non-Automatic hostnames by what Caddy has to be told about each.
+    /// </summary>
+    /// <remarks>
+    /// The grouping is not cosmetic. External needs <c>skip</c>, which switches
+    /// HTTPS off for the host entirely; Manual needs <c>skip_certificates</c>,
+    /// which keeps TLS on and only stops Caddy fetching a certificate. Putting a
+    /// Manual hostname in the first list loads the uploaded certificate perfectly
+    /// and then serves nothing on 443.
+    /// </remarks>
+    public async Task<TlsPolicySet> GetTlsPolicyAsync(CancellationToken ct)
+    {
+        var rows = await db.Domains
             .AsNoTracking()
             .Where(d => d.TlsMode != TlsMode.Automatic && d.DetachedAt == null)
-            .Select(d => d.Hostname)
+            .Select(d => new { d.Hostname, d.TlsMode })
             .ToListAsync(ct)
             .ConfigureAwait(false);
+
+        return new TlsPolicySet(
+            [.. rows.Where(r => r.TlsMode == TlsMode.External).Select(r => r.Hostname)],
+            [.. rows.Where(r => r.TlsMode == TlsMode.Manual).Select(r => r.Hostname)],
+            [.. rows.Where(r => r.TlsMode == TlsMode.Internal).Select(r => r.Hostname)]);
+    }
 
     private static DomainTarget? ToTarget(Domain domain, Application app, string? redirectTo)
     {

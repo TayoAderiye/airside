@@ -386,29 +386,61 @@ public sealed class CaddyProxyManager(
     }
 
     /// <summary>
-    /// Replaces Caddy's automatic-HTTPS skip list wholesale.
+    /// Replaces the whole TLS policy for non-Automatic hostnames.
     /// </summary>
     /// <remarks>
-    /// A whole-list write rather than incremental edits, because the list has to
-    /// match the set of non-Automatic domains exactly. Adding without removing
-    /// would leave a hostname skipped after it was switched back to Automatic,
-    /// and it would then never get a certificate with nothing to explain why.
+    /// Whole-list writes rather than incremental edits, because each list has to
+    /// match its set of domains exactly. Adding without removing would leave a
+    /// hostname skipped after it was switched back to Automatic, and it would then
+    /// never get a certificate with nothing to explain why.
     /// </remarks>
-    public async Task SetAutomaticHttpsSkipAsync(IReadOnlyCollection<string> hostnames, CancellationToken ct)
+    public async Task ApplyTlsPolicyAsync(TlsPolicySet policy, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(hostnames);
+        ArgumentNullException.ThrowIfNull(policy);
 
-        var payload = new CaddyAutomaticHttps { Skip = [.. hostnames] };
+        var automatic = new CaddyAutomaticHttps
+        {
+            Skip = [.. policy.SkipEntirely],
+            SkipCertificates = [.. policy.SkipCertificates],
+        };
 
         using var response = await http.PostAsJsonAsync(
-            $"/config/apps/http/servers/{_options.ServerName}/automatic_https", payload, Json, ct)
+            $"/config/apps/http/servers/{_options.ServerName}/automatic_https", automatic, Json, ct)
             .ConfigureAwait(false);
 
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             throw new ProxyUnavailableException(
-                $"Caddy rejected the automatic-HTTPS skip list: {response.StatusCode} {Trim(body)}");
+                $"Caddy rejected the automatic-HTTPS policy: {response.StatusCode} {Trim(body)}");
+        }
+
+        await EnsureTlsPathsAsync(ct).ConfigureAwait(false);
+
+        // The automation block is replaced even when empty, so a hostname that
+        // stops being Internal stops being issued for by the local CA.
+        var automation = new CaddyAutomation
+        {
+            Policies = policy.Internal.Count == 0
+                ? []
+                :
+                [
+                    new CaddyAutomationPolicy
+                    {
+                        Subjects = [.. policy.Internal],
+                        Issuers = [new CaddyIssuer { Module = "internal" }],
+                    },
+                ],
+        };
+
+        using var automationResponse = await http.PostAsJsonAsync(
+            "/config/apps/tls/automation", automation, Json, ct).ConfigureAwait(false);
+
+        if (!automationResponse.IsSuccessStatusCode)
+        {
+            var body = await automationResponse.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new ProxyUnavailableException(
+                $"Caddy rejected the internal-issuer policy: {automationResponse.StatusCode} {Trim(body)}");
         }
     }
 
@@ -442,9 +474,30 @@ public sealed class CaddyProxyManager(
         }
     }
 
-    private static string CertificateTag(string hostname) =>
-        "airside-cert-" + string.Concat(hostname.Select(c =>
+    public const string CertificateIdPrefix = "airside-cert-";
+
+    public static string CertificateTag(string hostname) =>
+        CertificateIdPrefix + string.Concat(hostname.Select(c =>
             char.IsAsciiLetterOrDigit(c) ? char.ToLowerInvariant(c) : '-'));
+
+    public async Task<IReadOnlyList<string>> ListLoadedCertificateIdsAsync(CancellationToken ct)
+    {
+        using var response = await http
+            .GetAsync(new Uri("/config/apps/tls/certificates/load_pem", UriKind.Relative), ct)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            // No tls app yet, which is the same as holding no certificates.
+            return [];
+        }
+
+        var loaded = await response.Content
+            .ReadFromJsonAsync<List<CaddyLoadedCertificate>>(Json, ct)
+            .ConfigureAwait(false) ?? [];
+
+        return [.. loaded.Select(c => c.Id).OfType<string>()];
+    }
 
     private static string Trim(string text) => text.Length <= 300 ? text : text[..300] + "…";
 
@@ -516,6 +569,26 @@ public sealed class CaddyProxyManager(
     private sealed class CaddyAutomaticHttps
     {
         public List<string>? Skip { get; set; }
+
+        [JsonPropertyName("skip_certificates")]
+        public List<string>? SkipCertificates { get; set; }
+    }
+
+    private sealed class CaddyAutomation
+    {
+        public List<CaddyAutomationPolicy>? Policies { get; set; }
+    }
+
+    private sealed class CaddyAutomationPolicy
+    {
+        public List<string>? Subjects { get; set; }
+
+        public List<CaddyIssuer>? Issuers { get; set; }
+    }
+
+    private sealed class CaddyIssuer
+    {
+        public string? Module { get; set; }
     }
 
     private sealed class CaddyTlsApp
