@@ -73,7 +73,7 @@ public class Job : Entity
 /// </summary>
 /// <remarks>
 /// Verbose output — build logs, pg_dump stderr — deliberately does not land here.
-/// It streams over SignalR and, where worth keeping, goes to a deployment log. A
+/// It streams live and, where worth keeping, goes to a deployment log. A
 /// job table carrying megabytes of container output makes every job list query
 /// slow, and job lists are on the busiest screen in the product.
 /// </remarks>

@@ -486,8 +486,8 @@ failing: a resize landing during a backup would corrupt both.
 ### `JobStep`
 
 `Id`, `JobId`, `Sequence`, `Name`, `Status`, `StartedAt`, `CompletedAt`,
-`Message`. Append-only; this is the step log the brief requires and what SignalR
-replays to a client that connects late.
+`Message`. Append-only; this is the step log the brief requires, and the sequence
+is the resume id a reconnecting client sends back as `Last-Event-ID`.
 
 Verbose output — build logs, `pg_dump` stderr — does **not** go here. It streams
 live and, where it is worth keeping, lands in `DeploymentLog`. A
@@ -574,8 +574,8 @@ successful one.
 > Minute-resolution samples for 20 workloads across two metrics is roughly 57,000
 > rows a day, which Postgres shrugs at and SQLite accumulates unpleasantly over
 > months without disciplined pruning that nobody will write. Live charts stream
-> from the Docker stats API over SignalR and stay in a bounded in-memory ring
-> buffer. Rollups give useful trend history at ~480 rows a day.
+> from the Docker stats API over a server-sent-event stream and are never
+> persisted. Rollups give useful trend history at ~480 rows a day.
 >
 > The cost is real and worth stating: you cannot retrospectively examine a
 > two-minute CPU spike from last Tuesday. For a single-host control plane where

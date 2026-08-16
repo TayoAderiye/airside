@@ -70,7 +70,14 @@ public interface IJobContext
 
     Task ReportProgressAsync(int percent, string currentStep, CancellationToken ct);
 
-    /// <summary>Appends to the step log. Streamed over SignalR and replayed to late joiners.</summary>
+    /// <summary>
+    /// Appends to the step log.
+    /// </summary>
+    /// <remarks>
+    /// The sequence number doubles as the resume id on the live stream, so a
+    /// client that reconnects continues from the step it last saw rather than
+    /// replaying the whole log or missing the middle of it.
+    /// </remarks>
     Task LogStepAsync(string name, string message, CancellationToken ct);
 
     /// <summary>
