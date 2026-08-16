@@ -1,0 +1,178 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Status scale — functional, load-bearing */
+  --color-running: var(--status-running);
+  --color-running-soft: var(--status-running-soft);
+  --color-degraded: var(--status-degraded);
+  --color-degraded-soft: var(--status-degraded-soft);
+  --color-failed: var(--status-failed);
+  --color-failed-soft: var(--status-failed-soft);
+  --color-stopped: var(--status-stopped);
+  --color-stopped-soft: var(--status-stopped-soft);
+  --color-transitional: var(--status-transitional);
+  --color-transitional-soft: var(--status-transitional-soft);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), var(--font-inter), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+}
+
+:root {
+  color-scheme: dark;
+
+  --background: #0e1116;
+  --foreground: #e6edf3;
+  --card: #161b22;
+  --card-foreground: #e6edf3;
+  --popover: #12161c;
+  --popover-foreground: #e6edf3;
+
+  --primary: #58a6ff;
+  --primary-foreground: #06101f;
+  --secondary: #1c232d;
+  --secondary-foreground: #e6edf3;
+  --muted: #1c232d;
+  --muted-foreground: #8b949e;
+  --accent: #1c232d;
+  --accent-foreground: #e6edf3;
+
+  --destructive: #f85149;
+  --destructive-foreground: #0e1116;
+
+  --border: #2a313c;
+  --input: #2a313c;
+  --ring: #58a6ff;
+
+  --radius: 0.375rem;
+
+  /* Status hues — mutually separable, colour is redundant reinforcement */
+  --status-running: #3fb950;
+  --status-running-soft: #12351d;
+  --status-degraded: #d29922;
+  --status-degraded-soft: #3a2c0c;
+  --status-failed: #f85149;
+  --status-failed-soft: #3d1618;
+  --status-stopped: #8b949e;
+  --status-stopped-soft: #232a33;
+  --status-transitional: #a371f7;
+  --status-transitional-soft: #291d43;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: ' cv02 ', 'cv03', 'cv04', 'cv11';
+  }
+  /* Visible, consistent keyboard focus everywhere */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+/* Transitional states pulse so "working" never reads as "stuck" */
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-status-pulse {
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes stream-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+.animate-stream-blink {
+  animation: stream-blink 1s steps(2, start) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-status-pulse,
+  .animate-stream-blink {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Thin, unobtrusive scrollbars for dense operator surfaces */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Range slider thumb — matches the accent, large enough to grab */
+.control-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 1rem;
+  width: 1rem;
+  border-radius: 9999px;
+  background: var(--primary);
+  border: 2px solid var(--background);
+  cursor: pointer;
+}
+.control-slider::-moz-range-thumb {
+  height: 1rem;
+  width: 1rem;
+  border-radius: 9999px;
+  background: var(--primary);
+  border: 2px solid var(--background);
+  cursor: pointer;
+}
+.control-slider:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
