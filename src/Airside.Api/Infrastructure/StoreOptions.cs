@@ -25,6 +25,13 @@ public sealed class AirsideStoreOptions
     /// would happen on the first self-update if it lived inside the container.
     /// </summary>
     public string KeyRingPath { get; set; } = AirsideLabels.HostPaths.KeyRing;
+
+    /// <summary>
+    /// Where backup artefacts are written. Configurable for the same reason the
+    /// key ring is: an operator with a separate data disk will want backups on it,
+    /// and a compiled-in constant makes that impossible.
+    /// </summary>
+    public string BackupRoot { get; set; } = AirsideLabels.HostPaths.Backups;
 }
 
 /// <summary>

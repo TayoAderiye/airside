@@ -37,6 +37,7 @@ internal static class DockerMapping
             // Hardening applied to everything Airside creates.
             SecurityOpt = spec.Security.NoNewPrivileges ? ["no-new-privileges:true"] : [],
             CapDrop = [.. spec.Security.DropCapabilities],
+            CapAdd = [.. spec.Security.AddCapabilities],
             ReadonlyRootfs = spec.Security.ReadOnlyRootFilesystem,
         };
 

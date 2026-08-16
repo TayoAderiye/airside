@@ -276,7 +276,7 @@ internal sealed class DockerVolumeOperations(DD.IDockerClient client) : IVolumeO
     {
         ArgumentNullException.ThrowIfNull(destination);
 
-        var containerId = await CreateHelperAsync(volumeName, readOnly: true, ct).ConfigureAwait(false);
+        var containerId = await StartHelperAsync(volumeName, readOnly: true, ct).ConfigureAwait(false);
 
         try
         {
@@ -286,8 +286,33 @@ internal sealed class DockerVolumeOperations(DD.IDockerClient client) : IVolumeO
                 statOnly: false,
                 ct).ConfigureAwait(false);
 
-            using var archive = response.Stream;
-            await ExtractSingleEntryAsync(archive, destination, ct).ConfigureAwait(false);
+            // Spooled to a temp file before parsing. Docker.DotNet hands back a
+            // chunked HTTP stream, and TarReader reads each entry for exactly its
+            // declared length — against that stream the read runs off the end and
+            // throws EndOfStreamException partway through the payload. A seekable
+            // file makes the framing reliable, and a temp file rather than memory
+            // because a data volume can be far larger than the control plane's
+            // heap.
+            var spool = Path.Combine(Path.GetTempPath(), $"airside-archive-{Guid.CreateVersion7():N}.tar");
+
+            try
+            {
+                await using (var spooled = File.Create(spool))
+                {
+                    using var responseStream = response.Stream;
+                    await responseStream.CopyToAsync(spooled, ct).ConfigureAwait(false);
+                }
+
+                await using var archive = File.OpenRead(spool);
+                await ExtractSingleEntryAsync(archive, destination, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (File.Exists(spool))
+                {
+                    File.Delete(spool);
+                }
+            }
         }
         finally
         {
@@ -314,7 +339,7 @@ internal sealed class DockerVolumeOperations(DD.IDockerClient client) : IVolumeO
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        var containerId = await CreateHelperAsync(volumeName, readOnly: false, ct).ConfigureAwait(false);
+        var containerId = await StartHelperAsync(volumeName, readOnly: false, ct).ConfigureAwait(false);
 
         try
         {
@@ -338,17 +363,19 @@ internal sealed class DockerVolumeOperations(DD.IDockerClient client) : IVolumeO
 
     private const string HelperMount = "/airside-volume";
 
-    private async Task<string> CreateHelperAsync(string volumeName, bool readOnly, CancellationToken ct)
+    private async Task<string> StartHelperAsync(string volumeName, bool readOnly, CancellationToken ct)
     {
         var created = await client.Containers.CreateContainerAsync(
             new DM.CreateContainerParameters
             {
                 Image = MeasurementImage,
-                // Never started. The archive API works against a created
-                // container, so the helper never runs a single instruction — which
-                // is the smallest possible surface for something that mounts a
-                // production data volume.
-                Cmd = ["true"],
+                // It has to run. Docker mounts a volume when the container
+                // starts, not when it is created, so an archive pulled from a
+                // never-started helper is empty — which surfaces as "attempted to
+                // read past the end of the stream" rather than anything that names
+                // the cause. `sleep` keeps it alive with no network, no
+                // capabilities, and a read-only root while the copy happens.
+                Cmd = ["sleep", "3600"],
                 Labels = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [AirsideLabels.Managed] = AirsideLabels.True,
@@ -373,6 +400,10 @@ internal sealed class DockerVolumeOperations(DD.IDockerClient client) : IVolumeO
                 },
             },
             ct).ConfigureAwait(false);
+
+        await client.Containers
+            .StartContainerAsync(created.ID, new DM.ContainerStartParameters(), ct)
+            .ConfigureAwait(false);
 
         return created.ID;
     }

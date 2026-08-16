@@ -11,8 +11,11 @@ namespace Airside.Api.Features.Databases;
 internal sealed class BackupStore(
     AirsideDbContext db,
     ISecretProtector protector,
-    TimeProvider timeProvider) : IBackupStore
+    TimeProvider timeProvider,
+    Microsoft.Extensions.Options.IOptions<Infrastructure.AirsideStoreOptions> options) : IBackupStore
 {
+    private readonly string _backupRoot = options.Value.BackupRoot;
+
     public async Task<BackupRecord?> GetBackupAsync(Guid backupId, CancellationToken ct)
     {
         var backup = await db.Backups
@@ -92,7 +95,7 @@ internal sealed class BackupStore(
             Kind = Core.Databases.BackupKind.Logical,
             TriggerKind = BackupTriggerKind.PreRestore,
             Status = BackupStatus.Running,
-            StoragePath = BackupPath(database),
+            StoragePath = BackupPath(_backupRoot, database),
             EngineSnapshot = $"{database.Engine.ToString().ToLowerInvariant()}:{database.Version}",
             DatabaseNameSnapshot = database.DatabaseName,
             StartedAt = timeProvider.GetUtcNow().UtcDateTime,
@@ -151,13 +154,12 @@ internal sealed class BackupStore(
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        // Superseded, not revoked. The old credential keeps working until an
-        // operator explicitly revokes it, which is what gives attached
-        // applications a window to be redeployed.
+        // Retired, not revoked: the engine has already stopped accepting it, and
+        // the row is kept so the audit trail records what was replaced and when.
         foreach (var old in previous)
         {
-            old.State = CredentialState.Superseded;
-            old.SupersededAt = timeProvider.GetUtcNow().UtcDateTime;
+            old.State = CredentialState.Retired;
+            old.RetiredAt = timeProvider.GetUtcNow().UtcDateTime;
             old.IsPrimary = false;
         }
 
@@ -183,7 +185,7 @@ internal sealed class BackupStore(
         return revealed.IsSuccess ? revealed.Value : null;
     }
 
-    public static string BackupPath(DatabaseInstance database)
+    public static string BackupPath(string backupRoot, DatabaseInstance database)
     {
         ArgumentNullException.ThrowIfNull(database);
 
@@ -192,7 +194,7 @@ internal sealed class BackupStore(
         // Under the managed backup root, with a name derived from the validated
         // slug and a v7 id. Nothing here comes from a request body.
         return Path.Combine(
-            AirsideLabels.HostPaths.Backups,
+            backupRoot,
             database.Slug,
             $"{Guid.CreateVersion7():N}.{extension}");
     }

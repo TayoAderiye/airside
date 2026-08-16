@@ -167,6 +167,7 @@ internal sealed class RedisEngine(IContainerRuntime runtime) : DatabaseEngineBas
             Limits = new ContainerLimits(spec.MemoryBytes, spec.CpuNanos),
             NetworkName = context.NetworkName,
             RestartPolicy = spec.AutoRestart ? RestartPolicy.UnlessStopped : RestartPolicy.No,
+            Security = ContainerSecurity.DatabaseEngine,
             Mounts = [new VolumeMount(context.DataVolumeName, "/data")],
             Ports = DatabasePorts.For(spec, Capabilities.DefaultPort),
 

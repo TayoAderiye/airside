@@ -58,6 +58,7 @@ switch (storeOptions.Provider)
         throw new InvalidOperationException($"Unknown store provider '{storeOptions.Provider}'.");
 }
 
+builder.Services.Configure<AirsideStoreOptions>(builder.Configuration.GetSection(AirsideStoreOptions.Section));
 builder.Services.AddAirsideData();
 builder.Services.AddAirsideRuntime();
 builder.Services.Configure<DockerOptions>(builder.Configuration.GetSection(DockerOptions.Section));

@@ -521,7 +521,7 @@ DatabaseCredentialDto = {
   password: SecretField
   connectionString: SecretField
   isPrimary: boolean
-  state: "active" | "superseded" | "revoked"
+  state: "active" | "retired" | "revoked"
   createdAt: string
 }
 ```

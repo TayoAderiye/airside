@@ -400,14 +400,20 @@ compare against.
 
 `Id`, `DatabaseInstanceId`, `Username` (**null for Redis** — `requirepass`
 authenticates the implicit `default` user), `EncryptedPassword`, `IsPrimary`,
-`State` (`Active` | `Superseded` | `Revoked`), `CreatedAt`, `SupersededAt`,
+`State` (`Active` | `Retired` | `Revoked`), `CreatedAt`, `RetiredAt`,
 `RotatedByUserId`.
 
-A table rather than two columns on the instance, for two reasons: **rotation
-needs two live credentials at once** — issue the new one, redeploy attached
-applications, then revoke the old, otherwise every attached app breaks the
-instant you rotate — and Redis 6+ ACL users drop in later as additional rows
+A table rather than two columns on the instance so the record of who rotated what
+and when survives, and so Redis 6+ ACL users drop in later as additional rows
 rather than as a schema change.
+
+> **Correction.** An earlier version of this document claimed the table provided
+> two live credentials at once, with a rotate → redeploy → revoke window. It does
+> not, and testing against a live Postgres proved it: each engine stores one
+> password per role, so rotation replaces it and the old value is rejected
+> immediately. Rotation is therefore a breaking change for anything connected.
+> Real overlap requires issuing a *second role* with matching grants, which is a
+> separate feature rather than a state on this row.
 
 ### `Backup`
 

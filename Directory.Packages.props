@@ -27,9 +27,10 @@
       Docker.DotNet's newest release is 3.125.15 (2021). It is still the only
       maintained typed client, and Docker's Engine API is backward compatible, so
       a 2021 client works against a current daemon for the endpoints it knows.
-      Airside pins the negotiated API version explicitly rather than relying on
-      the library's default, and the runtime layer is the only place affected if
-      it ever needs replacing.
+      Airside sends no explicit API version by default so the daemon picks its
+      own: a fixed pin cannot span Docker 20.10 (max 1.41) and Docker 29
+      (min 1.44). The runtime layer is the only place affected if the library
+      ever needs replacing.
     -->
     <PackageVersion Include="Docker.DotNet" Version="3.125.15" />
   </ItemGroup>

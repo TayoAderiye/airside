@@ -157,13 +157,23 @@ public sealed class DatabaseBackupHandler(
         }
         catch (InvalidOperationException ex)
         {
+            logger.LogError(ex, "Backup {BackupId} failed", record.Id);
             await backups.RecordBackupFailedAsync(record.Id, ex.Message, ct).ConfigureAwait(false);
             return new Error("backup.failed", ex.Message);
         }
         catch (IOException ex)
         {
+            // Logged with the exception, not just a summary. A backup that failed
+            // for a reason nobody can discover is a backup nobody will fix.
+            logger.LogError(ex, "Backup {BackupId} could not be written to {Path}", record.Id, temporaryPath);
             await backups.RecordBackupFailedAsync(record.Id, ex.Message, ct).ConfigureAwait(false);
-            return new Error("backup.failed", "The backup could not be written to disk.");
+            return new Error("backup.failed", $"The backup could not be written to disk: {ex.Message}");
+        }
+        catch (Core.Containers.ContainerRuntimeException ex)
+        {
+            logger.LogError(ex, "Backup {BackupId} failed in the container runtime", record.Id);
+            await backups.RecordBackupFailedAsync(record.Id, ex.Message, ct).ConfigureAwait(false);
+            return new Error(ErrorCodes.RuntimeUnavailable, ex.Message);
         }
     }
 
@@ -202,7 +212,9 @@ public sealed class DatabaseRestoreHandler(
     Core.Containers.IContainerRuntime runtime,
     IDatabaseEngineRegistry engines,
     IDatabaseWorkloadStore workloads,
-    IBackupStore backups) : IJobHandler
+    IBackupStore backups,
+    BackupExecutor executor,
+    ILogger<DatabaseRestoreHandler> logger) : IJobHandler
 {
     public string JobType => BackupJobTypes.Restore;
 
@@ -257,6 +269,45 @@ public sealed class DatabaseRestoreHandler(
 
         await context.ReportProgressAsync(20, "Taking a safety backup", ct).ConfigureAwait(false);
         var safetyBackupId = await backups.CreatePreRestoreBackupAsync(payload.WorkloadId, ct).ConfigureAwait(false);
+        var safety = await backups.GetBackupAsync(safetyBackupId, ct).ConfigureAwait(false);
+
+        if (safety is null)
+        {
+            return await FailAsync(
+                payload, "restore.safety_backup_failed",
+                "The pre-restore safety backup record could not be created.", ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            // Actually taken, not merely recorded. This is the only copy of the
+            // current data once the restore begins, so a restore that proceeds
+            // without it is a one-way door disguised as a reversible operation.
+            var artifact = await executor.RunAsync(
+                workload, safety.StoragePath, safety.EngineSnapshot, null, ct).ConfigureAwait(false);
+
+            await backups.RecordBackupResultAsync(
+                safetyBackupId, artifact.SizeBytes, artifact.Sha256, artifact.EngineSnapshot,
+                artifact.Kind.ToString(), ct).ConfigureAwait(false);
+
+            await context.LogStepAsync(
+                "safety-backup",
+                $"Captured {artifact.SizeBytes} bytes of the current data before restoring.", ct)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger.LogError(ex, "The pre-restore safety backup failed; refusing to restore");
+            await backups.RecordBackupFailedAsync(safetyBackupId, ex.Message, ct).ConfigureAwait(false);
+
+            // Refused rather than continued. Restoring without a safety backup
+            // turns "we picked the wrong backup" from an inconvenience into
+            // permanent data loss.
+            return await FailAsync(
+                payload, "restore.safety_backup_failed",
+                "The pre-restore safety backup failed, so the restore was not attempted. "
+                + $"Current data is untouched. {ex.Message}", ct).ConfigureAwait(false);
+        }
 
         var requiresStop = engine.Capabilities.RequiresStopForRestore;
 
@@ -344,10 +395,20 @@ public sealed class DatabaseRestoreHandler(
 /// Issues a new credential without revoking the old one.
 /// </summary>
 /// <remarks>
-/// Two credentials are live at once, deliberately. Replacing in place would break
-/// every attached application at the instant of rotation; the flow is rotate,
-/// redeploy the applications, then revoke — and revoke is a separate, explicit
-/// call so the middle step cannot be skipped by accident.
+/// <para>
+/// Rotation is a breaking operation and the API says so rather than implying a
+/// grace period. Each engine keeps one password per role, so the moment
+/// <c>ALTER USER … PASSWORD</c> lands the previous value stops authenticating —
+/// verified against a live Postgres, where the old password is rejected
+/// immediately. Anything currently connected keeps its session but fails on
+/// reconnect.
+/// </para>
+/// <para>
+/// True overlap would require issuing a second role with the same grants. That is
+/// a real feature and a later one; pretending this is it would mean an operator
+/// rotating in business hours on the strength of a grace period that does not
+/// exist.
+/// </para>
 /// </remarks>
 public sealed class RotateCredentialsHandler(
     IDatabaseEngineRegistry engines,
@@ -392,8 +453,9 @@ public sealed class RotateCredentialsHandler(
 
         await context.LogStepAsync(
             "rotate",
-            "The new credential is live. The previous one still works — redeploy anything attached to "
-            + "this database, then revoke the old credential explicitly.", ct).ConfigureAwait(false);
+            "The new credential is live and the previous one no longer authenticates. Anything attached "
+            + "to this database will fail on its next reconnect until it is redeployed with the new "
+            + "password.", ct).ConfigureAwait(false);
 
         await context.ReportProgressAsync(100, "Rotated", ct).ConfigureAwait(false);
         return Result.Ok();

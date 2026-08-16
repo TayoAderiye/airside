@@ -22,11 +22,24 @@ public sealed class DockerOptions
     public string SocketUri { get; set; } = "unix:///var/run/docker.sock";
 
     /// <summary>
-    /// The Engine API version to negotiate. Pinned rather than left to
-    /// Docker.DotNet's default, because the library has had no release since 2021
-    /// and its built-in default predates several daemon versions Airside will meet.
+    /// An explicit Engine API version, or empty to let the daemon choose.
     /// </summary>
-    public string ApiVersion { get; set; } = "1.43";
+    /// <remarks>
+    /// <para>
+    /// Empty by default, and that is deliberate. Airside originally pinned 1.43;
+    /// Docker 29 reports <c>MinAPIVersion 1.44</c> and rejects anything older with
+    /// a bare <c>BadRequest</c>, so the pin made the control plane unable to talk
+    /// to any current daemon. Pinning high fails the other way — Docker 20.10 tops
+    /// out at 1.41 — so there is no single version that works everywhere.
+    /// </para>
+    /// <para>
+    /// Sending no version leaves the daemon to use its own, which works across the
+    /// whole supported range because the Engine API keeps existing fields
+    /// backward-compatible. The setting remains as an escape hatch for pinning
+    /// against a specific host.
+    /// </para>
+    /// </remarks>
+    public string ApiVersion { get; set; } = string.Empty;
 }
 
 public static class DependencyInjection
@@ -39,11 +52,14 @@ public static class DependencyInjection
         {
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DockerOptions>>().Value;
 
-            return new DockerClientConfiguration(
+            var configuration = new DockerClientConfiguration(
                 new Uri(options.SocketUri),
                 credentials: null,
-                defaultTimeout: TimeSpan.FromMinutes(5))
-                .CreateClient(Version.Parse(options.ApiVersion));
+                defaultTimeout: TimeSpan.FromMinutes(5));
+
+            return string.IsNullOrWhiteSpace(options.ApiVersion)
+                ? configuration.CreateClient()
+                : configuration.CreateClient(Version.Parse(options.ApiVersion));
         });
 
         services.AddSingleton<IContainerRuntime>(sp => new DockerContainerRuntime(
@@ -67,6 +83,7 @@ public static class DependencyInjection
         services.AddSingleton<Queries.IQueryConsoleFactory, Queries.QueryConsoleFactory>();
 
         services.AddScoped<IJobHandler, DatabaseProvisionHandler>();
+        services.AddSingleton<BackupExecutor>();
         services.AddScoped<IJobHandler, DatabaseBackupHandler>();
         services.AddScoped<IJobHandler, DatabaseRestoreHandler>();
         services.AddScoped<IJobHandler, RotateCredentialsHandler>();

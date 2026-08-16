@@ -82,6 +82,7 @@ internal static class BackupEndpoints
         IJobQueue jobs,
         IAuditWriter audit,
         TimeProvider timeProvider,
+        Microsoft.Extensions.Options.IOptions<AirsideStoreOptions> storeOptions,
         HttpContext http,
         CancellationToken ct)
     {
@@ -106,7 +107,7 @@ internal static class BackupEndpoints
             DatabaseInstanceId = id,
             Kind = capabilities.SupportsSnapshotBackup ? BackupKind.Snapshot : BackupKind.Logical,
             TriggerKind = BackupTriggerKind.Manual,
-            StoragePath = BackupStore.BackupPath(database),
+            StoragePath = BackupStore.BackupPath(storeOptions.Value.BackupRoot, database),
             EngineSnapshot = $"{database.Engine.ToString().ToLowerInvariant()}:{database.Version}",
             DatabaseNameSnapshot = database.DatabaseName,
             StartedAt = timeProvider.GetUtcNow().UtcDateTime,
@@ -318,16 +319,16 @@ internal static class BackupEndpoints
             return new Error(ErrorCodes.WorkloadNotFound, "This database has no active credential.").ToProblem();
         }
 
-        // Written as Superseded until the engine confirms it. A credential row
-        // that claims to be active before the database agrees would send
-        // applications a password that does not work.
+        // Written as Retired until the engine confirms it. A credential row that
+        // claims to be active before the database agrees would hand applications a
+        // password that does not work.
         var replacement = new DatabaseCredential
         {
             DatabaseInstanceId = id,
             Username = current.Username,
             EncryptedPassword = protector.Protect(generator.GeneratePassword()),
             IsPrimary = false,
-            State = CredentialState.Superseded,
+            State = CredentialState.Retired,
             RotatedByUserId = CurrentUserId(http),
         };
 
@@ -414,16 +415,16 @@ internal static class BackupEndpoints
 
         if (credential.IsPrimary)
         {
-            // Revoking the live credential locks every attached application out
-            // at once. Rotate first; that is what makes the old one revocable.
+            // Revoking the live credential would leave the database with no
+            // usable password at all, and Airside would lose its own access.
             return new Error(
                 ErrorCodes.ValidationFailed,
-                "This is the active credential. Rotate first, redeploy anything attached, then revoke the "
-                + "superseded one.").ToProblem();
+                "This is the active credential and revoking it would leave the database unreachable. "
+                + "Rotate to issue a replacement instead.").ToProblem();
         }
 
         credential.State = CredentialState.Revoked;
-        credential.SupersededAt ??= timeProvider.GetUtcNow().UtcDateTime;
+        credential.RetiredAt ??= timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return TypedResults.NoContent();

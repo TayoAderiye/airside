@@ -271,6 +271,9 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                     b.Property<bool>("IsPrimary")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("RetiredAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("RotatedByUserId")
                         .HasColumnType("TEXT");
 
@@ -280,9 +283,6 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                     b.Property<string>("State")
                         .IsRequired()
                         .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("SupersededAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAt")

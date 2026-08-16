@@ -98,15 +98,52 @@ public enum RestartPolicy
 /// write to root-owned paths, so it detects and warns rather than silently
 /// failing to deliver a guarantee.
 /// </param>
+/// <param name="AddCapabilities">
+/// Capabilities restored after dropping the rest. Empty for anything that does
+/// not need them.
+/// </param>
 public sealed record ContainerSecurity(
     bool NoNewPrivileges,
     IReadOnlyList<string> DropCapabilities,
+    IReadOnlyList<string> AddCapabilities,
     bool ReadOnlyRootFilesystem,
     string? User)
 {
+    /// <summary>Drop everything. Correct for anything Airside itself runs.</summary>
     public static ContainerSecurity Default { get; } = new(
         NoNewPrivileges: true,
         DropCapabilities: ["ALL"],
+        AddCapabilities: [],
+        ReadOnlyRootFilesystem: false,
+        User: null);
+
+    /// <summary>
+    /// Drop everything, then restore the five capabilities a standard database
+    /// image's entrypoint needs to start.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Found by running it: with a bare <c>CapDrop=ALL</c> the official Postgres
+    /// image crash-loops on <c>chmod: /var/lib/postgresql/data: Operation not
+    /// permitted</c> followed by <c>failed switching to 'postgres'</c>. The
+    /// entrypoint starts as root, takes ownership of the data directory, and then
+    /// de-escalates to the service user with gosu — so it needs
+    /// <c>CHOWN</c>, <c>DAC_OVERRIDE</c>, and <c>FOWNER</c> to fix up the volume,
+    /// and <c>SETUID</c>/<c>SETGID</c> to drop privileges. MySQL, MongoDB, and
+    /// Redis all follow the same pattern.
+    /// </para>
+    /// <para>
+    /// This is still far tighter than Docker's default: <c>NET_RAW</c> (packet
+    /// spoofing), <c>SYS_ADMIN</c>, <c>SYS_PTRACE</c> (reading another process's
+    /// memory), <c>MKNOD</c>, <c>SYS_CHROOT</c>, and the rest stay dropped. The
+    /// point of dropping ALL was never to break de-escalation — it was to remove
+    /// the capabilities an attacker could use, and those are all still gone.
+    /// </para>
+    /// </remarks>
+    public static ContainerSecurity DatabaseEngine { get; } = new(
+        NoNewPrivileges: true,
+        DropCapabilities: ["ALL"],
+        AddCapabilities: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
         ReadOnlyRootFilesystem: false,
         User: null);
 }

@@ -127,11 +127,16 @@ public class DatabaseInstance : Workload
 /// A credential for a database.
 /// </summary>
 /// <remarks>
-/// A table rather than two columns on the instance, for two reasons. Rotation
-/// needs two live credentials at once — issue the new one, redeploy attached
-/// applications, then revoke the old, or every attached app breaks at the instant
-/// of rotation. And Redis 6+ ACL users arrive later as additional rows rather
-/// than as a schema change.
+/// A table rather than two columns on the instance, so the history of who rotated
+/// what and when survives, and so Redis 6+ ACL users arrive later as additional
+/// rows rather than as a schema change.
+/// <para>
+/// It does <em>not</em> provide overlapping live credentials, and an earlier
+/// version of this design wrongly assumed it did. Each engine stores one password
+/// per role, so a rotation is a breaking change for everything currently
+/// connected. Genuine overlap needs a second role — <c>CREATE ROLE app_2</c> with
+/// the same grants — which is a larger feature, not a state on this row.
+/// </para>
 /// </remarks>
 public class DatabaseCredential : Entity
 {
@@ -149,7 +154,7 @@ public class DatabaseCredential : Entity
 
     public CredentialState State { get; set; } = CredentialState.Active;
 
-    public DateTime? SupersededAt { get; set; }
+    public DateTime? RetiredAt { get; set; }
 
     public Guid? RotatedByUserId { get; set; }
 }
@@ -157,7 +162,19 @@ public class DatabaseCredential : Entity
 public enum CredentialState
 {
     Active,
-    Superseded,
+
+    /// <summary>
+    /// Replaced by a rotation and no longer accepted by the engine.
+    /// </summary>
+    /// <remarks>
+    /// Not "superseded but still usable". Postgres, MySQL, and MongoDB each store
+    /// one password per role, so <c>ALTER USER … PASSWORD</c> replaces it and the
+    /// previous value stops authenticating immediately — confirmed against a live
+    /// Postgres, which rejects the old password the moment rotation completes. The
+    /// row survives for the audit trail, not because it still works.
+    /// </remarks>
+    Retired,
+
     Revoked,
 }
 

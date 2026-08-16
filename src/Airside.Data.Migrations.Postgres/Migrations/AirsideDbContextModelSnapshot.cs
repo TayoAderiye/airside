@@ -276,6 +276,9 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.Property<bool>("IsPrimary")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("RetiredAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("RotatedByUserId")
                         .HasColumnType("uuid");
 
@@ -286,9 +289,6 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
-
-                    b.Property<DateTime?>("SupersededAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
