@@ -141,7 +141,11 @@ docker compose up -d
 log "Waiting for the control plane to become healthy"
 i=0
 while [ "$i" -lt 60 ]; do
-  if docker exec airside-api wget -qO- http://localhost:8080/health >/dev/null 2>&1; then
+  # The API binary's own probe. The runtime image is chiselled and contains no
+  # shell, wget or curl, so anything else here fails not because the API is
+  # unhealthy but because the command does not exist — and the installer then
+  # reports a healthy install as a failed one, every time, on every host.
+  if docker exec airside-api dotnet Airside.Api.dll --health >/dev/null 2>&1; then
     break
   fi
   i=$((i + 1))
@@ -149,6 +153,21 @@ while [ "$i" -lt 60 ]; do
 done
 
 [ "$i" -lt 60 ] || die "the API did not become healthy — check 'docker logs airside-api'"
+
+log "Waiting for the dashboard"
+i=0
+while [ "$i" -lt 30 ]; do
+  if docker exec airside-ui wget -qO- http://localhost:3000/login >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 2
+done
+
+# Not fatal. The API is up and the CLI works, so an operator can still act; a
+# dashboard that is slow to start is not a reason to fail an otherwise good
+# install and leave them thinking nothing came up.
+[ "$i" -lt 30 ] || log "the dashboard has not answered yet — check 'docker logs airside-ui'"
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 

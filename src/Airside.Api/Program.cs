@@ -40,6 +40,42 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
 
+// ---------------------------------------------------------------------------
+// Health probe, before anything else starts.
+//
+// The runtime image is chiselled: no shell, no wget, no curl. A Docker
+// HEALTHCHECK has to run inside the container it describes, so there was nothing
+// available to run one with — the compose healthcheck called wget and could only
+// ever fail, leaving the API permanently unhealthy, and the installer's
+// readiness loop called the same missing binary and always concluded the API had
+// not come up.
+//
+// So the probe is this binary. Heavier than curl, but it is the only executable
+// in the image, and a healthcheck that cannot run is worth less than none at all.
+// ---------------------------------------------------------------------------
+if (args is ["--health", ..])
+{
+    using var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+    try
+    {
+        var url = Environment.GetEnvironmentVariable("AIRSIDE_HEALTH_URL")
+            ?? "http://localhost:8080/health";
+
+        using var health = await probe.GetAsync(new Uri(url)).ConfigureAwait(false);
+
+        return health.IsSuccessStatusCode ? 0 : 1;
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or UriFormatException)
+    {
+        // Unhealthy, not crashed. Docker reads the exit code and a stack trace
+        // here would be written to the healthcheck log every interval.
+        await Console.Error.WriteLineAsync(ex.Message).ConfigureAwait(false);
+
+        return 1;
+    }
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // ---------------------------------------------------------------------------
@@ -320,6 +356,10 @@ app.MapRealtimeEndpoints();
 app.MapOpenApi().RequireAuthorization();
 
 await app.RunAsync().ConfigureAwait(false);
+
+// The --health branch at the top returns an exit code, which makes this whole
+// entry point int-returning. A clean shutdown is a zero.
+return 0;
 
 /// <summary>Exposed so integration tests can drive the real pipeline via WebApplicationFactory.</summary>
 public partial class Program;

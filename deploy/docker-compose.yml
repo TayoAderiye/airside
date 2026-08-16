@@ -84,9 +84,12 @@ services:
     networks:
       - airside-internal
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      # The API binary, not wget. This image is chiselled — no shell, no wget, no
+      # curl — so the obvious healthcheck could only ever fail, and left the
+      # container permanently unhealthy while it served every request perfectly.
+      test: ["CMD", "dotnet", "Airside.Api.dll", "--health"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 5
       start_period: 60s
     labels:
