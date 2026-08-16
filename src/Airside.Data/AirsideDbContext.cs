@@ -67,6 +67,8 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
 
     public DbSet<IssuanceAttempt> IssuanceAttempts => Set<IssuanceAttempt>();
 
+    public DbSet<DomainCertificate> DomainCertificates => Set<DomainCertificate>();
+
     public DbSet<Backup> Backups => Set<Backup>();
 
     public DbSet<Restore> Restores => Set<Restore>();

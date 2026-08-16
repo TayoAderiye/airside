@@ -2,6 +2,10 @@ using System.Threading.RateLimiting;
 using Airside.Api.Contracts;
 using Airside.Api.Features;
 using Airside.Api.Features.Applications;
+using Airside.Api.Features.Domains;
+using Airside.Runtime.Domains;
+using Airside.Runtime.Dns;
+using Airside.Core.Domains;
 using Airside.Api.Features.Databases;
 using Airside.Api.Hosting;
 using Airside.Api.Realtime;
@@ -147,6 +151,14 @@ builder.Services.AddScoped<ApplicationService>();
 builder.Services.AddScoped<IApplicationStore, ApplicationStore>();
 builder.Services.AddScoped<DomainStore>();
 builder.Services.AddScoped<IDomainStore>(sp => sp.GetRequiredService<DomainStore>());
+builder.Services.AddScoped<IHostnameRegistry>(sp => sp.GetRequiredService<DomainStore>());
+builder.Services.AddScoped<IIssuanceLedger, IssuanceLedger>();
+builder.Services.Configure<AcmeRateLimitOptions>(builder.Configuration.GetSection(AcmeRateLimitOptions.Section));
+builder.Services.Configure<DnsOptions>(builder.Configuration.GetSection(DnsOptions.Section));
+builder.Services.Configure<ReachabilityOptions>(builder.Configuration.GetSection(ReachabilityOptions.Section));
+builder.Services.AddHostedService<CertificateExpiryService>();
+builder.Services.AddAirsideForwardedHeaders(builder.Configuration);
+builder.Services.AddHostedService<CertificateStoreCheck>();
 builder.Services.Configure<CaddyOptions>(builder.Configuration.GetSection(CaddyOptions.Section));
 builder.Services.AddHostedService<ProxyReconciliationService>();
 builder.Services.AddHostedService<HostDiscoveryService>();
@@ -173,6 +185,11 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+// Before anything that reads the client address: audit entries, rate limiting,
+// and generated links are all wrong if this runs later. Only the proxies named
+// in configuration are believed — see ForwardedHeaderSetup.
+app.UseForwardedHeaders();
 
 // ---------------------------------------------------------------------------
 // Migrate and seed before serving traffic. A failed migration means the health

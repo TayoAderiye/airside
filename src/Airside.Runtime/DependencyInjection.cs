@@ -10,6 +10,9 @@ using Airside.Core.Security;
 using Airside.Runtime.Docker;
 using Airside.Core.Proxy;
 using Airside.Runtime.Hosting;
+using Airside.Core.Domains;
+using Airside.Runtime.Dns;
+using Airside.Runtime.Domains;
 using Airside.Runtime.Proxy;
 using Airside.Runtime.Security;
 using Docker.DotNet;
@@ -99,6 +102,18 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(15);
         });
         services.AddSingleton<EnvironmentRenderer>();
+
+        // Pre-flight and certificate validation. The suffix list and the proxy
+        // range index each parse an embedded file once, so they are singletons;
+        // the locks must be, or two jobs would take different semaphores for the
+        // same hostname and serialise nothing.
+        services.AddSingleton<IPublicSuffixList, PublicSuffixList>();
+        services.AddSingleton<ProxyRangeIndex>();
+        services.AddSingleton<HostnameLocks>();
+        services.AddSingleton<ICertificateValidator, CertificateValidator>();
+        services.AddSingleton<IDnsInspector, DnsInspector>();
+        services.AddHttpClient<IExternalReachability, ExternalReachability>();
+        services.AddScoped<IDomainPreflight, DomainPreflight>();
 
         services.AddScoped<IJobHandler, DeployHandler>();
         services.AddScoped<IJobHandler, AttachmentHandler>();

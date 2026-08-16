@@ -1,3 +1,4 @@
+using Airside.Core.Domains;
 using Airside.Core.Proxy;
 using Airside.Runtime.Jobs;
 using Airside.Tests.Databases;
@@ -22,7 +23,7 @@ public class DomainUnbindTests
         var proxy = new RecordingProxy();
 
         // GetAsync returns null, exactly as it does after the soft delete.
-        var handler = new UnbindDomainHandler(proxy, new EmptyDomainStore());
+        var handler = new UnbindDomainHandler(proxy, new EmptyDomainStore(), new HostnameLocks());
         var context = new FakeJobContext(
             new DomainPayload(Guid.CreateVersion7(), Bind: false, "app.example.com"));
 
@@ -40,7 +41,7 @@ public class DomainUnbindTests
         // reconciliation is the only thing that can clean it up — but the job
         // must not fail, or it would block its workload.
         var proxy = new RecordingProxy();
-        var handler = new UnbindDomainHandler(proxy, new EmptyDomainStore());
+        var handler = new UnbindDomainHandler(proxy, new EmptyDomainStore(), new HostnameLocks());
 
         var result = await handler.ExecuteAsync(
             new FakeJobContext(new DomainPayload(Guid.CreateVersion7(), Bind: false)),
@@ -57,7 +58,17 @@ public class DomainUnbindTests
 
         public Task RecordBoundAsync(Guid domainId, string routeId, CancellationToken ct) => Task.CompletedTask;
 
-        public Task RecordFailedAsync(Guid domainId, string code, CancellationToken ct) => Task.CompletedTask;
+        public Task RecordFailedAsync(Guid domainId, string code, string? message, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task RecordStatusAsync(Guid domainId, DomainStatus status, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task<IReadOnlyList<string>> ListAutomaticHttpsSkipAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+
+        public Task<ManualCertificate?> GetManualCertificateAsync(Guid domainId, CancellationToken ct) =>
+            Task.FromResult<ManualCertificate?>(null);
 
         public Task<IReadOnlyList<DomainTarget>> ListLiveAsync(CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<DomainTarget>>([]);
@@ -83,6 +94,17 @@ public class DomainUnbindTests
 
         public Task<CertificateStatus?> GetCertificateAsync(string hostname, CancellationToken ct) =>
             Task.FromResult<CertificateStatus?>(null);
+
+        public Task<IReadOnlyList<ObservedRoute>> ListAllRoutesAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ObservedRoute>>([]);
+
+        public Task LoadCertificateAsync(ManualCertificate certificate, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task UnloadCertificateAsync(string hostname, CancellationToken ct) => Task.CompletedTask;
+
+        public Task SetAutomaticHttpsSkipAsync(IReadOnlyCollection<string> hostnames, CancellationToken ct) =>
+            Task.CompletedTask;
 
         public Task<bool> IsAvailableAsync(CancellationToken ct) => Task.FromResult(true);
     }

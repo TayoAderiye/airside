@@ -69,3 +69,21 @@ public class IssuanceAttemptConfiguration : IEntityTypeConfiguration<IssuanceAtt
         builder.HasIndex(x => new { x.Hostname, x.AttemptedAt });
     }
 }
+
+public class DomainCertificateConfiguration : IEntityTypeConfiguration<DomainCertificate>
+{
+    public void Configure(EntityTypeBuilder<DomainCertificate> builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.ToTable("domain_certificates");
+        builder.HasKey(x => x.Id);
+
+        builder.Property(x => x.ChainPem).IsRequired();
+        builder.Property(x => x.EncryptedPrivateKey).IsRequired();
+        builder.Property(x => x.Fingerprint).HasMaxLength(128);
+
+        // One current certificate per domain. A replacement overwrites rather than
+        // accumulating, so there is never a question of which one is being served.
+        builder.HasIndex(x => x.DomainId).IsUnique();
+    }
+}

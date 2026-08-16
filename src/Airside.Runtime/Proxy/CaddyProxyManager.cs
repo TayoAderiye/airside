@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Airside.Core.Domains;
 using Airside.Core.Proxy;
 using Microsoft.Extensions.Logging;
 
@@ -51,9 +52,11 @@ public sealed class CaddyProxyManager(
 
     private readonly CaddyOptions _options = options.Value;
 
+    public const string RouteIdPrefix = "airside-route-";
+
     public static string RouteId(string hostname) =>
         // Only characters a Caddy @id and a URL path segment both tolerate.
-        "airside-route-" + string.Concat(hostname.Select(c =>
+        RouteIdPrefix + string.Concat(hostname.Select(c =>
             char.IsAsciiLetterOrDigit(c) ? char.ToLowerInvariant(c) : '-'));
 
     public async Task UpsertRouteAsync(RouteSpec route, CancellationToken ct)
@@ -139,7 +142,7 @@ public sealed class CaddyProxyManager(
         return
         [
             .. routes
-                .Where(r => r.Id?.StartsWith("airside-route-", StringComparison.Ordinal) == true)
+                .Where(r => r.Id?.StartsWith(RouteIdPrefix, StringComparison.Ordinal) == true)
                 .Select(r => new RouteSpec(
                     r.Match?.FirstOrDefault()?.Host?.FirstOrDefault() ?? string.Empty,
                     ParseUpstream(r.Handle?.FirstOrDefault()?.Upstreams?.FirstOrDefault()?.Dial))),
@@ -193,24 +196,255 @@ public sealed class CaddyProxyManager(
         }
     }
 
-    private static CaddyRoute BuildRoute(string id, RouteSpec route) => new()
+    /// <summary>
+    /// Builds the route for a hostname, whose shape depends entirely on the mode.
+    /// </summary>
+    /// <remarks>
+    /// A redirect carries no upstream, maintenance carries a static response
+    /// instead of one, and External serves over plain HTTP because TLS ended at
+    /// something in front of this host.
+    /// </remarks>
+    private static CaddyRoute BuildRoute(string id, RouteSpec route)
     {
-        Id = id,
-        Match = [new CaddyMatch { Host = [route.Hostname] }],
-        Handle =
-        [
-            new CaddyHandler
+        var handlers = new List<CaddyHandler>();
+
+        // HSTS goes on first: a header handler has to run before the handler that
+        // produces the response, or the response is already on its way out.
+        if (route.Hsts is { } hsts && route.Mode != TlsMode.External)
+        {
+            handlers.Add(new CaddyHandler
+            {
+                Handler = "headers",
+                Response = new CaddyHeaderOps
+                {
+                    Set = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                    {
+                        ["Strict-Transport-Security"] = [hsts.ToHeaderValue()],
+                    },
+                },
+            });
+        }
+
+        if (route.RedirectTo is { } target)
+        {
+            handlers.Add(new CaddyHandler
+            {
+                Handler = "static_response",
+
+                // 308 rather than 301: it preserves the method and body, so a
+                // POST to the www form does not silently become a GET.
+                StatusCode = "308",
+                Headers = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                {
+                    ["Location"] = [$"https://{target}{{http.request.uri}}"],
+                },
+            });
+        }
+        else if (route.Maintenance)
+        {
+            // A stopped application still has a live hostname. Without this the
+            // proxy has nowhere to send the request and returns a bare 502, which
+            // tells a visitor nothing and an operator almost nothing.
+            handlers.Add(new CaddyHandler
+            {
+                Handler = "static_response",
+                StatusCode = "503",
+                Headers = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                {
+                    ["Content-Type"] = ["text/html; charset=utf-8"],
+                    ["Retry-After"] = ["120"],
+                },
+                Body = MaintenanceBody,
+            });
+        }
+        else
+        {
+            handlers.Add(new CaddyHandler
             {
                 Handler = "reverse_proxy",
                 Upstreams = [new CaddyUpstream { Dial = $"{route.Upstream.ContainerName}:{route.Upstream.Port}" }],
-            },
-        ],
 
-        // Terminal stops Caddy evaluating later routes once this host matches,
-        // so one application cannot receive another's traffic because of
-        // ordering.
-        Terminal = true,
-    };
+                // Airside terminates TLS, so the upstream is spoken to over plain
+                // HTTP on a private network. These tell the application what the
+                // client actually asked for, which is otherwise lost.
+                Headers = new CaddyProxyHeaders
+                {
+                    Request = new CaddyHeaderOps
+                    {
+                        Set = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+                        {
+                            ["X-Forwarded-Proto"] = [route.Mode == TlsMode.External ? "{http.request.header.X-Forwarded-Proto}" : "https"],
+                            ["X-Forwarded-Host"] = ["{http.request.host}"],
+                        },
+                    },
+                },
+            });
+        }
+
+        return new CaddyRoute
+        {
+            Id = id,
+            Match = [new CaddyMatch { Host = [route.Hostname] }],
+            Handle = handlers,
+
+            // Terminal stops Caddy evaluating later routes once this host matches,
+            // so one application cannot receive another's traffic because of
+            // ordering.
+            Terminal = true,
+        };
+    }
+
+    private const string MaintenanceBody =
+        "<!doctype html><meta charset=utf-8><title>Temporarily unavailable</title>"
+        + "<style>body{font-family:system-ui,sans-serif;margin:0;display:grid;place-items:center;"
+        + "min-height:100vh;background:#0f1115;color:#e6e8eb}main{text-align:center;max-width:32rem;"
+        + "padding:2rem}h1{font-weight:600;font-size:1.5rem;margin:0 0 .5rem}p{color:#9aa4b2;margin:0}</style>"
+        + "<main><h1>Temporarily unavailable</h1>"
+        + "<p>This site is not running at the moment. Please try again shortly.</p></main>";
+
+    public async Task<IReadOnlyList<ObservedRoute>> ListAllRoutesAsync(CancellationToken ct)
+    {
+        using var response = await http
+            .GetAsync(new Uri($"/config/apps/http/servers/{_options.ServerName}/routes", UriKind.Relative), ct)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            return [];
+        }
+
+        var routes = await response.Content
+            .ReadFromJsonAsync<List<CaddyRoute>>(Json, ct)
+            .ConfigureAwait(false) ?? [];
+
+        return
+        [
+            .. routes.Select(r => new ObservedRoute(
+                r.Id ?? string.Empty,
+                r.Match?.FirstOrDefault()?.Host?.FirstOrDefault() ?? string.Empty,
+                ParseUpstream(r.Handle?.Find(h => h.Handler == "reverse_proxy")?.Upstreams?.FirstOrDefault()?.Dial),
+                r.Id?.StartsWith(RouteIdPrefix, StringComparison.Ordinal) == true)),
+        ];
+    }
+
+    /// <summary>
+    /// Hands Caddy a certificate to hold in memory.
+    /// </summary>
+    /// <remarks>
+    /// Loaded through <c>/load</c> against the TLS app's certificate pool rather
+    /// than written to disk, so replacement takes effect on the next handshake
+    /// with no restart and no dropped connection.
+    /// </remarks>
+    public async Task LoadCertificateAsync(ManualCertificate certificate, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+
+        var payload = new CaddyLoadedCertificate
+        {
+            // Both, and they are not interchangeable: "@id" is what makes the
+            // entry addressable at /id/... for replacement, while "tags" is how
+            // Caddy selects a certificate when serving. Setting only tags — which
+            // is the obvious-looking choice — leaves the unload below returning
+            // 404 for ever, so every replacement quietly adds another certificate
+            // to the pool instead of superseding the old one.
+            Id = CertificateTag(certificate.Hostname),
+            Certificate = certificate.CertificateChainPem,
+            Key = certificate.PrivateKeyPem.Reveal(),
+            Tags = [CertificateTag(certificate.Hostname)],
+        };
+
+        await EnsureTlsPathsAsync(ct).ConfigureAwait(false);
+
+        // Replace by tag rather than append: uploading a renewal twice must not
+        // leave the old certificate in the pool, where Caddy might still pick it.
+        await UnloadCertificateAsync(certificate.Hostname, ct).ConfigureAwait(false);
+
+        using var response = await http.PostAsJsonAsync(
+            "/config/apps/tls/certificates/load_pem", payload, Json, ct).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new ProxyUnavailableException(
+                $"Caddy rejected the certificate for {certificate.Hostname}: {response.StatusCode} {Trim(body)}");
+        }
+
+        logger.LogInformation("Loaded a manual certificate for {Hostname}", certificate.Hostname);
+    }
+
+    public async Task UnloadCertificateAsync(string hostname, CancellationToken ct)
+    {
+        using var response = await http
+            .DeleteAsync(new Uri($"/id/{CertificateTag(hostname)}", UriKind.Relative), ct)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotFound)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            logger.LogWarning("Caddy would not unload the certificate for {Hostname}: {Body}", hostname, Trim(body));
+        }
+    }
+
+    /// <summary>
+    /// Replaces Caddy's automatic-HTTPS skip list wholesale.
+    /// </summary>
+    /// <remarks>
+    /// A whole-list write rather than incremental edits, because the list has to
+    /// match the set of non-Automatic domains exactly. Adding without removing
+    /// would leave a hostname skipped after it was switched back to Automatic,
+    /// and it would then never get a certificate with nothing to explain why.
+    /// </remarks>
+    public async Task SetAutomaticHttpsSkipAsync(IReadOnlyCollection<string> hostnames, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(hostnames);
+
+        var payload = new CaddyAutomaticHttps { Skip = [.. hostnames] };
+
+        using var response = await http.PostAsJsonAsync(
+            $"/config/apps/http/servers/{_options.ServerName}/automatic_https", payload, Json, ct)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new ProxyUnavailableException(
+                $"Caddy rejected the automatic-HTTPS skip list: {response.StatusCode} {Trim(body)}");
+        }
+    }
+
+    /// <summary>Creates the tls app and its certificate pool if the running config has neither.</summary>
+    /// <remarks>
+    /// The bootstrap config declares only the http app, so the first manual
+    /// certificate would otherwise POST into a path that does not exist and fail
+    /// with a message about JSON rather than about certificates.
+    /// </remarks>
+    private async Task EnsureTlsPathsAsync(CancellationToken ct)
+    {
+        using var probe = await http
+            .GetAsync(new Uri("/config/apps/tls/certificates/load_pem", UriKind.Relative), ct)
+            .ConfigureAwait(false);
+
+        if (probe.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        using var seed = await http.PostAsJsonAsync(
+            "/config/apps/tls",
+            new CaddyTlsApp { Certificates = new CaddyCertificates { LoadPem = [] } },
+            Json,
+            ct).ConfigureAwait(false);
+
+        if (!seed.IsSuccessStatusCode)
+        {
+            var body = await seed.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new ProxyUnavailableException($"Caddy would not accept a TLS app: {Trim(body)}");
+        }
+    }
+
+    private static string CertificateTag(string hostname) =>
+        "airside-cert-" + string.Concat(hostname.Select(c =>
+            char.IsAsciiLetterOrDigit(c) ? char.ToLowerInvariant(c) : '-'));
 
     private static string Trim(string text) => text.Length <= 300 ? text : text[..300] + "…";
 
@@ -236,6 +470,63 @@ public sealed class CaddyProxyManager(
         public string? Handler { get; set; }
 
         public List<CaddyUpstream>? Upstreams { get; set; }
+
+        /// <summary>
+        /// Deliberately untyped: Caddy uses "headers" for two different shapes.
+        /// </summary>
+        /// <remarks>
+        /// <c>reverse_proxy</c> nests <c>request</c> and <c>response</c> objects
+        /// under it; <c>static_response</c> takes a flat name-to-values map. Two
+        /// CLR properties cannot both serialise to one JSON name, so the shape is
+        /// chosen where the handler is built.
+        /// </remarks>
+        public object? Headers { get; set; }
+
+        [JsonPropertyName("status_code")]
+        public string? StatusCode { get; set; }
+
+        public string? Body { get; set; }
+
+        [JsonPropertyName("response")]
+        public CaddyHeaderOps? Response { get; set; }
+    }
+
+    private sealed class CaddyProxyHeaders
+    {
+        public CaddyHeaderOps? Request { get; set; }
+    }
+
+    private sealed class CaddyHeaderOps
+    {
+        public Dictionary<string, List<string>>? Set { get; set; }
+    }
+
+    private sealed class CaddyLoadedCertificate
+    {
+        [JsonPropertyName("@id")]
+        public string? Id { get; set; }
+
+        public string? Certificate { get; set; }
+
+        public string? Key { get; set; }
+
+        public List<string>? Tags { get; set; }
+    }
+
+    private sealed class CaddyAutomaticHttps
+    {
+        public List<string>? Skip { get; set; }
+    }
+
+    private sealed class CaddyTlsApp
+    {
+        public CaddyCertificates? Certificates { get; set; }
+    }
+
+    private sealed class CaddyCertificates
+    {
+        [JsonPropertyName("load_pem")]
+        public List<CaddyLoadedCertificate>? LoadPem { get; set; }
     }
 
     private sealed class CaddyUpstream

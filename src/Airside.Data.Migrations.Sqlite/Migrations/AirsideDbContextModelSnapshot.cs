@@ -604,6 +604,57 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                     b.ToTable("domains", (string)null);
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.DomainCertificate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ChainPem")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("DomainId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EncryptedPrivateKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NotAfter")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("NotBefore")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("UploadedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DomainId")
+                        .IsUnique();
+
+                    b.ToTable("domain_certificates", (string)null);
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.EnvironmentVariable", b =>
                 {
                     b.Property<Guid>("Id")

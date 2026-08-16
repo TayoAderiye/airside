@@ -164,3 +164,34 @@ public class IssuanceAttempt : Entity
 
     public DateTime AttemptedAt { get; set; }
 }
+
+/// <summary>
+/// Stored certificate material for a <see cref="Core.Domains.TlsMode.Manual"/> domain.
+/// </summary>
+/// <remarks>
+/// A separate table rather than columns on <see cref="Domain"/>, because the
+/// private key must not travel with every domain query, projection, and list
+/// response. Kept out of the way, it can only be read by code that asked for it
+/// by name — which is the difference between a key that is hard to leak and one
+/// that is merely not logged today.
+/// </remarks>
+public class DomainCertificate : Entity
+{
+    public Guid DomainId { get; set; }
+
+    /// <summary>Leaf first, then intermediates. Normalised at upload rather than trusted.</summary>
+    public string ChainPem { get; set; } = string.Empty;
+
+    /// <summary>Encrypted with the Data Protection key ring, exactly as database passwords are.</summary>
+    public string EncryptedPrivateKey { get; set; } = string.Empty;
+
+    public string Fingerprint { get; set; } = string.Empty;
+
+    public DateTime NotBefore { get; set; }
+
+    public DateTime NotAfter { get; set; }
+
+    public Guid? UploadedByUserId { get; set; }
+
+    public DateTime UploadedAt { get; set; }
+}
