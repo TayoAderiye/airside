@@ -190,7 +190,9 @@ verified against real infrastructure rather than mocks — real Docker container
 a real Caddy, a real private registry, a real SMTP server, real DNS.
 
 **The installer has now been run on a fresh Linux host** — Ubuntu 24.04 on EC2,
-2 GB, x86-64. It found four bugs, all fixed:
+2 GB, x86-64 — and the dashboard driven through a browser afterwards. Between
+them they found twelve bugs, all fixed. The install path itself accounted for
+four:
 
 - It never downloaded the compose file it then ran, so every install stopped at
   `docker compose pull`.
@@ -202,12 +204,15 @@ a real Caddy, a real private registry, a real SMTP server, real DNS.
 - A fresh install served a blank page, because routes are only created when a
   domain is bound and a new box has none.
 
-Two of those reported success and failed later, somewhere that did not name the
-cause. [ROADMAP.md](ROADMAP.md) has the detail.
+Attaching a domain found five more, all of which could lock an operator out —
+including reconciliation deleting the dashboard's own route every two minutes,
+which presents as a dashboard that works, stops, and works again. None of the
+five were reachable from a test suite: each needs the passage of time, or a
+container to be replaced. [ROADMAP.md](ROADMAP.md) has the detail.
 
-So the install path works, but 0.1.3 has not yet been run end to end on a clean
-box — only its parts have. Expect rough edges, and the first install is still
-the most useful thing to report on.
+A clean install of 0.1.6 has not yet been run end to end — only its parts have.
+Expect rough edges, and the first install is still the most useful thing to
+report on.
 
 Known gaps, recorded rather than hidden:
 
@@ -218,8 +223,11 @@ Known gaps, recorded rather than hidden:
 - Notification schedules have no holiday calendar — "weekdays" includes
   Christmas Day.
 - Metric retention is hourly rollups for 90 days, with no configuration.
-- Proxy reconciliation restores application routes but not the dashboard's own,
-  so a replaced proxy container needs the dashboard domain set again by hand.
+- There is no way to enrol in multi-factor authentication. The login screen
+  accepts a TOTP code and the API can enrol one, but no screen calls it.
+- Twenty-five API endpoints have no dashboard screen — self-update, most domain
+  operations, private registries, and metric charts among them. They are listed
+  in [docs/dashboard-wiring-plan.md](docs/dashboard-wiring-plan.md).
 
 ## Building from source
 
