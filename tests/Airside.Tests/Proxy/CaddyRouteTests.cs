@@ -170,8 +170,14 @@ public class CaddyRouteTests
     [Fact]
     public async Task ARejectedRouteThrowsRatherThanBeingIgnored()
     {
+        // Three attempts, not two: patch by id, insert at the front, then append
+        // because an empty route list cannot be inserted into. All three have to
+        // fail for the route to be genuinely rejected — a route that silently
+        // does not exist is worse than an exception, because the hostname simply
+        // stops answering with nothing to say why.
         var (proxy, _) = Build(
             (HttpStatusCode.InternalServerError, "no id"),
+            (HttpStatusCode.InternalServerError, "array index out of bounds: 0"),
             (HttpStatusCode.BadRequest, "invalid route"));
 
         await Assert.ThrowsAsync<ProxyUnavailableException>(() =>
