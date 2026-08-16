@@ -29,7 +29,7 @@ public class RegistryHostTests
         Assert.Equal(expected, RegistryHost.Of(repository));
 
     [Theory]
-    [InlineData("ghcr.io/tayo/airside", "ghcr.io")]
+    [InlineData("ghcr.io/tayoriye/airside", "ghcr.io")]
     [InlineData("quay.io/prometheus/node-exporter", "quay.io")]
     [InlineData("123456789.dkr.ecr.eu-west-1.amazonaws.com/app", "123456789.dkr.ecr.eu-west-1.amazonaws.com")]
     public void ADottedFirstComponentIsARegistry(string repository, string expected) =>
@@ -88,7 +88,7 @@ public class RegistryHostTests
     [Fact]
     public void AParsedReferenceResolvesTheSameWayAsItsRepository()
     {
-        var image = ImageReference.Parse("ghcr.io/tayo/airside:0.1.0");
+        var image = ImageReference.Parse("ghcr.io/tayoriye/airside:0.1.0");
 
         Assert.Equal("ghcr.io", RegistryHost.Of(image));
     }

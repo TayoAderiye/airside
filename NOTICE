@@ -1,0 +1,70 @@
+Airside
+Copyright 2026 Airside contributors
+
+This product includes software developed by the Airside contributors and is
+licensed under the Apache License, Version 2.0. See LICENSE.
+
+
+================================================================================
+Bundled data
+================================================================================
+
+The following third-party material is redistributed inside this repository and
+inside the published container image.
+
+--------------------------------------------------------------------------------
+Public Suffix List
+    src/Airside.Runtime/Dns/data/public_suffix_list.dat
+
+    Source:  https://publicsuffix.org/list/public_suffix_list.dat
+    Licence: Mozilla Public License, v. 2.0
+             https://mozilla.org/MPL/2.0/
+
+    Used to determine the registrable domain (eTLD+1) of a hostname, which is
+    what Let's Encrypt counts certificate issuance against.
+
+    Comments and blank lines have been stripped from the upstream file; the
+    upstream VERSION line is retained in the header. No rule has been altered,
+    added, or removed. The unmodified file is available from the URL above.
+
+    This Source Code Form is subject to the terms of the Mozilla Public License,
+    v. 2.0. If a copy of the MPL was not distributed with this file, You can
+    obtain one at https://mozilla.org/MPL/2.0/.
+
+--------------------------------------------------------------------------------
+Cloudflare IP ranges
+    src/Airside.Runtime/Dns/data/cloudflare_ranges.txt
+
+    Source:  https://www.cloudflare.com/ips-v4
+             https://www.cloudflare.com/ips-v6
+
+    Published by Cloudflare, Inc. as public network information. Used to detect
+    a proxied ("orange-clouded") DNS record during domain pre-flight, so that a
+    certificate challenge which cannot succeed is explained rather than
+    attempted.
+
+    Cloudflare is a trademark of Cloudflare, Inc. Airside is not affiliated with
+    or endorsed by Cloudflare.
+
+
+================================================================================
+Dependencies
+================================================================================
+
+These are resolved from NuGet at build time and are not redistributed in source
+form. Listed for attribution; each remains under its own licence.
+
+    Docker.DotNet ................................. MIT
+    LibGit2Sharp .................................. MIT
+    MailKit / MimeKit ............................. MIT
+    Microsoft.EntityFrameworkCore (and providers) . MIT
+    Microsoft.AspNetCore.* ........................ MIT
+    DnsClient.NET ................................. Apache-2.0
+    Serilog (and sinks) ........................... Apache-2.0
+    FluentValidation .............................. Apache-2.0
+    Npgsql.EntityFrameworkCore.PostgreSQL ......... PostgreSQL Licence
+
+The container image is built from Microsoft's .NET base images and runs
+alongside the official Caddy, PostgreSQL, Redis, MySQL, and MongoDB images.
+Those are pulled at runtime and are not redistributed here; each is governed by
+its own licence.

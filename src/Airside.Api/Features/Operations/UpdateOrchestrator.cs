@@ -12,7 +12,7 @@ public sealed class UpdateOptions
     public const string Section = "Airside:Update";
 
     /// <summary>The repository the control-plane image is pulled from.</summary>
-    public string ImageRepository { get; set; } = "ghcr.io/tayo/airside";
+    public string ImageRepository { get; set; } = "ghcr.io/tayoriye/airside";
 
     /// <summary>Where <c>state.json</c> lives. A host path, so it survives the container being replaced.</summary>
     public string StatePath { get; set; } = AirsideLabels.HostPaths.State;
