@@ -426,6 +426,28 @@ Two of those had the same shape: the install *reported success* and the failure
 surfaced later, somewhere that did not name the cause. That is worth more
 attention than the individual bugs.
 
+### Then using it
+
+Installing successfully is not the same as working. Provisioning a database and
+deploying an application on that host found three more:
+
+- **The allocation gate refused everything.** The host reserve was a fixed one
+  core, one GiB and ten GiB, which does not scale down. On the 1 vCPU, 2 GB
+  instance the README recommends as a starting point, the CPU reserve took the
+  whole core and the gate answered *"Not enough cpu available, available 0"* on
+  an idle machine. The storage reserve exceeded the entire filesystem. It is now
+  a bounded share of capacity, and the memory share is set from a measurement —
+  a fresh install uses 0.7 GiB with nothing deployed, so a quarter would have
+  reserved less than the control plane itself occupies.
+- **Storage accounting ignored everything Airside had not allocated.** The gate
+  believed it had 4.7 GiB to hand out on a disk with 3.0 GiB free, because the
+  operating system and the images were in neither the reserve nor the allocated
+  total. Foreign usage now counts against the reserve, with Airside's own
+  volumes subtracted back out so their bytes are not charged twice.
+- **The database create form sent neither `databaseName` nor `username`.** Both
+  are required by every engine that has the concept and rejected outright by
+  those that do not, so the fix is per-engine rather than "send them always".
+
 Still open from that run, none of them blocking:
 
 - `Cannot load library libgssapi_krb5.so.2` at startup — Npgsql probing for
