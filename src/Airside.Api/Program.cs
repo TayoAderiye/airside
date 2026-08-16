@@ -312,10 +312,12 @@ app.MapNotificationChannelEndpoints();
 app.MapDashboardDomainEndpoints();
 
 app.MapRealtimeEndpoints();
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+// Served in every environment, behind authentication. The UI is a separate
+// codebase generated from this document, and gating it to Development means the
+// people building against a real instance cannot read the contract of the thing
+// they are building against. It describes routes rather than exposing them —
+// every one still enforces its own permission.
+app.MapOpenApi().RequireAuthorization();
 
 await app.RunAsync().ConfigureAwait(false);
 

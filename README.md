@@ -88,6 +88,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 | | |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How it fits together, and why |
+| [docs/frontend-brief.md](docs/frontend-brief.md) | Building a UI against this API |
 | [docs/domains-and-tls.md](docs/domains-and-tls.md) | TLS modes, why issuance fails, cloud provider specifics |
 | [docs/notifications.md](docs/notifications.md) | Channels, routing rules, hours, webhook signatures |
 | [docs/image-variants.md](docs/image-variants.md) | Alpine vs Debian database images |

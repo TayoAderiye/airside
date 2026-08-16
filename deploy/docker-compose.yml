@@ -35,7 +35,11 @@ services:
       airside.kind: "system"
 
   airside-api:
-    image: ghcr.io/tayoaderiye/airside:${AIRSIDE_VERSION:?installer must pin an explicit tag}
+    # AIRSIDE_IMAGE exists so an operator can run from their own registry — an
+    # air-gapped host, a mirror, or a build they made themselves — without editing
+    # this file and losing the change at the next update. The tag stays required
+    # and explicit either way.
+    image: ${AIRSIDE_IMAGE:-ghcr.io/tayoaderiye/airside}:${AIRSIDE_VERSION:?installer must pin an explicit tag}
     container_name: airside-api
     restart: unless-stopped
     depends_on:
