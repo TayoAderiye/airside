@@ -131,6 +131,73 @@ supports them, rather than shipping two more pages of invented data.
   the UI already knows because the version gate baked it in.
 - Correct the compose comment about system containers.
 
+## Audit: what the API offers and the dashboard never asks for
+
+Phases 1 to 5 replaced every mocked screen. That is not the same as covering the
+API. Of 79 endpoints, **37 are never called**, and some of them are features the
+README advertises on its front page.
+
+Ordered by how badly the absence hurts.
+
+### A database you create cannot be used
+
+Nothing calls `/api/v1/databases/{id}/credentials`. Provision Postgres and there
+is no way to obtain the password, the username or a connection string — the
+detail screen fetches the database and offers to delete it, and that is all. The
+database works; it is simply unreachable by anything you would want to connect
+to it.
+
+Rotation, reveal and revoke (`/credentials/rotate`, `/{credentialId}/reveal`,
+`/{credentialId}/revoke`) are unreachable with it. "Credential rotation" is
+listed on the README's feature list.
+
+### An application cannot be attached to a database
+
+`POST /api/v1/applications/{id}/databases` is never called, nor the detach
+alongside it. Pairwise network isolation — the thing the README calls the most
+important test in the suite — is configured through that one endpoint, so
+through the dashboard an application can never reach a database at all.
+
+### The second factor cannot be turned on
+
+The login screen accepts a TOTP code and the API implements enrolment
+(`/account/mfa`, `/enrol`, `/confirm`, `/disable`). No screen calls any of them,
+so there is no way to enrol an authenticator. A security feature that exists on
+the server and cannot be switched on.
+
+### Self-update is unreachable
+
+`/api/v1/system/updates` — the path that takes a backup, records each step to
+disk and can roll back by digest — is never called. "Self-update with rollback"
+is on the README's feature list. Upgrading means re-running `install.sh`, which
+does none of those things.
+
+### Databases have no lifecycle
+
+Applications can be started, stopped and restarted. Databases cannot:
+`/databases/{id}/start`, `/stop`, `/restart` and `/resize` are all unused, and
+the detail screen's only action is delete.
+
+### Domains are half wired
+
+The screen binds a domain and runs pre-flight. It cannot upload a certificate,
+delete a domain, set HSTS, move a domain between applications, re-run a check,
+or create the apex-and-www pair — six endpoints, all present, none called.
+
+### Private registries are unreachable
+
+Four endpoints for storing and verifying registry credentials, none called, so
+an image can only be pulled from somewhere anonymous.
+
+### Smaller, and honestly optional
+
+- Resource charts. `/workloads/{id}/metrics` and `/databases/{id}/metrics/stream`
+  are unused, so Monitoring shows logs and no graphs.
+- Deployment detail and build log (`/deployments/{id}`, `/{id}/log`).
+- The jobs list and cancelling a running job.
+- `/notifications/stream` — the screen fetches rather than subscribing.
+- Query history, restore preview, notification channel test.
+
 ## What this does not cover
 
 Nothing here changes the API except the four gaps, and three of those may be
