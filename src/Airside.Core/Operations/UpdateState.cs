@@ -42,6 +42,18 @@ public sealed record UpdateState
 
     public required string? ToImageDigest { get; init; }
 
+    /// <summary>The digests for the dashboard container, which is updated alongside the API.</summary>
+    /// <remarks>
+    /// Not <c>required</c>, unlike the pair above, and that is deliberate rather
+    /// than an oversight. An update already in flight when this version arrives
+    /// left a state file written without these fields, and that file is read by
+    /// the code that has to recover it. Making them required would turn the one
+    /// artefact recovery depends on into one that fails to parse.
+    /// </remarks>
+    public string? FromUiImageDigest { get; init; }
+
+    public string? ToUiImageDigest { get; init; }
+
     public required UpdateStep Step { get; init; }
 
     public required DateTimeOffset UpdatedAt { get; init; }

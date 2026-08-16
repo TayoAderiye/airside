@@ -137,7 +137,12 @@ static int Update(string[] args)
     Console.WriteLine();
     Console.WriteLine("  2. Pin the version and recreate the control plane:");
     Console.WriteLine($"       AIRSIDE_VERSION={version} \\");
-    Console.WriteLine("         docker compose -f /opt/airside/docker-compose.yml up -d airside-api");
+    Console.WriteLine("         docker compose -f /opt/airside/docker-compose.yml \\");
+    Console.WriteLine("         up -d airside-api airside-ui");
+    Console.WriteLine();
+    Console.WriteLine("     Both, named explicitly. The dashboard is a separate container and it");
+    Console.WriteLine("     refuses to render against an API of a different version, so updating one");
+    Console.WriteLine("     alone leaves you looking at a mismatch screen rather than at Airside.");
     Console.WriteLine();
     Console.WriteLine("  3. Check it came up:");
     Console.WriteLine("       airside status");
@@ -176,12 +181,32 @@ static int Rollback()
         Console.WriteLine();
     }
 
-    Console.WriteLine("  Recreate the control plane from the exact image that was running:");
-    Console.WriteLine($"    AIRSIDE_VERSION={state.FromImageDigest} \\");
-    Console.WriteLine("      docker compose -f /opt/airside/docker-compose.yml up -d airside-api");
+    Console.WriteLine("  Recreate the control plane from the exact images that were running:");
+    Console.WriteLine($"    AIRSIDE_API_REF={state.FromImageDigest} \\");
+
+    if (state.FromUiImageDigest is { } uiDigest)
+    {
+        Console.WriteLine($"    AIRSIDE_UI_REF={uiDigest} \\");
+        Console.WriteLine("      docker compose -f /opt/airside/docker-compose.yml \\");
+        Console.WriteLine("      up -d airside-api airside-ui");
+    }
+    else
+    {
+        // No dashboard digest recorded: either this instance predates the split,
+        // or the update was prepared by a version that did not know to record it.
+        // Rolling the API back alone is still correct, and saying why is better
+        // than printing a command with an empty variable in it.
+        Console.WriteLine("      docker compose -f /opt/airside/docker-compose.yml up -d airside-api");
+        Console.WriteLine();
+        Console.WriteLine("  No dashboard image was recorded for the previous version, so only the API");
+        Console.WriteLine("  is rolled back here. If the dashboard then reports a version mismatch, pin");
+        Console.WriteLine("  it to the same version with AIRSIDE_UI_VERSION and recreate airside-ui.");
+    }
+
     Console.WriteLine();
-    Console.WriteLine("  The digest is used rather than the tag, so this restores the build that was");
-    Console.WriteLine("  actually running rather than whatever the tag points at now.");
+    Console.WriteLine("  These are image ids rather than tags, so this restores the builds that were");
+    Console.WriteLine("  actually running rather than whatever the tags point at now — and it resolves");
+    Console.WriteLine("  them locally, which matters when the registry is part of why you are here.");
 
     return 0;
 }
@@ -288,6 +313,7 @@ static UpdateSnapshot? ReadState()
             Text(root, "fromVersion") ?? "unknown",
             Text(root, "toVersion") ?? "unknown",
             Text(root, "fromImageDigest"),
+            Text(root, "fromUiImageDigest"),
             Text(root, "step") ?? "unknown",
             Text(root, "updatedAt") ?? "unknown",
             Text(root, "backupPath"),
@@ -335,6 +361,9 @@ internal sealed record UpdateSnapshot(
     string FromVersion,
     string ToVersion,
     string? FromImageDigest,
+
+    /// <summary>Null on an instance whose update predates the dashboard container.</summary>
+    string? FromUiImageDigest,
     string Step,
     string UpdatedAt,
     string? BackupPath,

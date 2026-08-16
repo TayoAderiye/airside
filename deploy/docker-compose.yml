@@ -39,7 +39,15 @@ services:
     # air-gapped host, a mirror, or a build they made themselves — without editing
     # this file and losing the change at the next update. The tag stays required
     # and explicit either way.
-    image: ${AIRSIDE_IMAGE:-ghcr.io/tayoaderiye/airside}:${AIRSIDE_VERSION:?installer must pin an explicit tag}
+    #
+    # AIRSIDE_API_REF replaces the whole reference and is what rollback uses. A
+    # digest cannot be passed as AIRSIDE_VERSION: that would produce
+    # "repository:sha256:..." and Docker rejects it as an invalid reference,
+    # because a tag may not contain a colon. Rollback records a local image id,
+    # which is a valid reference on its own and needs no registry — which is the
+    # point, since the registry is one of the things that may be why you are
+    # rolling back.
+    image: ${AIRSIDE_API_REF:-${AIRSIDE_IMAGE:-ghcr.io/tayoaderiye/airside}:${AIRSIDE_VERSION:?installer must pin an explicit tag}}
     container_name: airside-api
     restart: unless-stopped
     depends_on:
@@ -92,7 +100,8 @@ services:
     # made for: shipping a dashboard fix without cutting a platform release. That
     # only works within a patch series — the dashboard compares major.minor
     # against the API on load and refuses to render against a different one.
-    image: ${AIRSIDE_UI_IMAGE:-ghcr.io/tayoaderiye/airside-ui}:${AIRSIDE_UI_VERSION:-${AIRSIDE_VERSION:?installer must pin an explicit tag}}
+    # AIRSIDE_UI_REF is the rollback override, as on the API above.
+    image: ${AIRSIDE_UI_REF:-${AIRSIDE_UI_IMAGE:-ghcr.io/tayoaderiye/airside-ui}:${AIRSIDE_UI_VERSION:-${AIRSIDE_VERSION:?installer must pin an explicit tag}}}
     container_name: airside-ui
     restart: unless-stopped
 

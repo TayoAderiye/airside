@@ -14,6 +14,18 @@ public sealed class UpdateOptions
     /// <summary>The repository the control-plane image is pulled from.</summary>
     public string ImageRepository { get; set; } = "ghcr.io/tayoaderiye/airside";
 
+    /// <summary>
+    /// The dashboard image, which moves with the API.
+    /// </summary>
+    /// <remarks>
+    /// Separate images so a dashboard fix can ship without a platform release,
+    /// but an update pulls and replaces both. Updating one alone is what the
+    /// dashboard's version check exists to catch, and an updater that reliably
+    /// produced the condition the product warns about would be an odd thing to
+    /// ship.
+    /// </remarks>
+    public string UiImageRepository { get; set; } = "ghcr.io/tayoaderiye/airside-ui";
+
     /// <summary>Where <c>state.json</c> lives. A host path, so it survives the container being replaced.</summary>
     public string StatePath { get; set; } = AirsideLabels.HostPaths.State;
 
@@ -91,6 +103,14 @@ public sealed class UpdateOrchestrator(
             .FindAsync(AirsideLabels.SystemContainers.Api, ct)
             .ConfigureAwait(false);
 
+        // May be absent on an instance installed before the dashboard became its
+        // own container. Recorded as null rather than treated as an error: the
+        // API is what this update is really about, and refusing to update because
+        // there is no UI container to note the digest of would be the wrong call.
+        var ui = await runtime.Containers
+            .FindAsync(AirsideLabels.SystemContainers.Ui, ct)
+            .ConfigureAwait(false);
+
         var state = new UpdateState
         {
             UpdateId = record.Id,
@@ -98,6 +118,7 @@ public sealed class UpdateOrchestrator(
             ToVersion = targetVersion,
             FromImageDigest = api?.ImageDigest,
             ToImageDigest = null,
+            FromUiImageDigest = ui?.ImageDigest,
             Step = UpdateStep.Starting,
             UpdatedAt = timeProvider.GetUtcNow(),
         };
@@ -145,6 +166,21 @@ public sealed class UpdateOrchestrator(
                 .PullAsync(target, null, auth, ct)
                 .ConfigureAwait(false);
 
+            // The dashboard, pulled in the same window and for the same reason:
+            // both images have to be on disk before anything is stopped, or the
+            // outage lasts as long as whichever download is slower. Pulled second
+            // because the API is the one that must not be missing.
+            var uiTarget = new ImageReference(options.UiImageRepository, targetVersion);
+
+            var uiAuth = await scope.ServiceProvider
+                .GetRequiredService<IRegistryCredentialSource>()
+                .ResolveAsync(uiTarget, ct)
+                .ConfigureAwait(false);
+
+            var uiImage = await runtime.Images
+                .PullAsync(uiTarget, null, uiAuth, ct)
+                .ConfigureAwait(false);
+
             record.ToImageDigest = image.Digest;
             record.FromImageDigest = api?.ImageDigest;
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -152,6 +188,7 @@ public sealed class UpdateOrchestrator(
             state = state with
             {
                 ToImageDigest = image.Digest,
+                ToUiImageDigest = uiImage.Digest,
                 Step = UpdateStep.Swapping,
                 UpdatedAt = timeProvider.GetUtcNow(),
             };
