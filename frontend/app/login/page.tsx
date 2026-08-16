@@ -36,7 +36,14 @@ export default function LoginPage() {
       router.replace('/dashboard')
     } catch (err) {
       setError(err)
-      if (err instanceof ApiError && /mfa|totp|authenticator/i.test(err.problem.detail)) {
+
+      // The server distinguishes "this account needs a code" from "that code was
+      // wrong", and both mean the field belongs on screen. Matching on the code
+      // rather than the wording of the message, which is free to change.
+      if (
+        err instanceof ApiError &&
+        (err.code === 'auth.mfa_required' || err.code === 'auth.mfa_invalid')
+      ) {
         setShowMfa(true)
       }
     } finally {
@@ -115,18 +122,19 @@ export default function LoginPage() {
               <LoginField
                 label="Authenticator code"
                 htmlFor="totp"
-                hint="6 digits from the app you enrolled."
+                hint="6 digits from the app you enrolled, or one of your recovery codes."
               >
                 <TextInput
                   id="totp"
-                  inputMode="numeric"
                   autoComplete="one-time-code"
                   autoFocus
                   mono
-                  maxLength={8}
+                  // Long enough for a recovery code, which is the field's other
+                  // job and the one that matters when the phone is gone.
+                  maxLength={11}
                   value={totp}
                   onChange={(e) => setTotp(e.target.value.replace(/\s/g, ''))}
-                  className="h-11 tracking-[0.35em]"
+                  className="h-11 tracking-[0.2em]"
                 />
               </LoginField>
             ) : (

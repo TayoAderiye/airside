@@ -63,6 +63,21 @@ public static class ErrorCodes
     public const string AuthLastSuperAdmin = "auth.last_super_admin";
     public const string AuthSetupTokenInvalid = "auth.setup_token_invalid";
 
+    /// <summary>
+    /// The password was right and a second factor is enrolled, so the client
+    /// should ask for a code and try again.
+    /// </summary>
+    /// <remarks>
+    /// This is deliberately distinct from <see cref="AuthInvalidCredentials"/>,
+    /// and it does confirm that the password was correct. That is not an
+    /// enumeration leak worth closing: reaching it already requires the
+    /// password, and the alternative is a login form that cannot tell the user
+    /// why it will not let them in.
+    /// </remarks>
+    public const string AuthMfaRequired = "auth.mfa_required";
+
+    public const string AuthMfaInvalid = "auth.mfa_invalid";
+
     // Jobs
     public const string JobNotFound = "job.not_found";
     public const string JobNotCancellable = "job.not_cancellable";

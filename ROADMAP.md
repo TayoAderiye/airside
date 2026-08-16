@@ -492,6 +492,78 @@ Still open from that run, none of them blocking:
 
 ---
 
+## Two-factor authentication — **done**
+
+Asked for as "the MFA enrolment", meaning the screen. The screen was the smaller
+half.
+
+**Login never checked the code.** `LoginAsync` accepted a `totpCode` field and
+ignored it; nothing in the auth path read `UserMfa` at all. Enrolment worked,
+`GET /account/mfa` reported the factor as confirmed, and the password alone still
+signed you in. Shipping only the screen would have handed an operator the belief
+that their control plane had two factors on it — worse than knowing it has one,
+because a password gets guarded when it is visibly the only thing standing there.
+That is the whole reason this section is longer than "added a panel".
+
+What the enforcement does:
+
+- Only a **confirmed** enrolment gates login. An unconfirmed one may be a secret
+  nobody successfully scanned, and enforcing it would lock someone out of the one
+  account that could fix it.
+- The accepted time step is **advanced on success**, so a code captured in transit
+  cannot be replayed inside its own thirty-second window.
+- **Recovery codes work in the same field** and are burned on use. The login form
+  used to cap that input at eight characters, which silently truncated an
+  eleven-character recovery code — on the exact path taken by someone whose phone
+  is gone.
+- A wrong code **feeds the lockout counter**. Six digits is a million guesses
+  against an endpoint that has already accepted the password.
+- An **undecryptable secret refuses the login** rather than falling back to the
+  password, which would silently drop the second factor for whoever turned up
+  after the key ring was replaced.
+
+The decision lives in `MfaChallenge.Evaluate` rather than inline in the endpoint,
+so it can be tested without an HTTP context. Fourteen tests, mostly about the
+*second* attempt — a code offered twice, a recovery code spent twice — because
+nothing in a single successful login distinguishes a working implementation from
+the one that ignored the field entirely.
+
+### The QR code, and why it is not a dependency
+
+The payload is an `otpauth://` URI containing the shared secret. That rules out a
+hosted chart API, and makes a transitive dependency on the page that renders it a
+supply chain terminating at the second factor. So `frontend/lib/qr.ts` is a QR
+encoder written for this: byte mode, error correction M, versions 1 to 10, and
+nothing else — modes that will never be reached are absent rather than untested.
+
+Verification is the part worth recording, because a wrong QR still renders as a
+plausible square of noise:
+
+- The first approach diffed the matrix against **segno**. Almost every payload
+  differed, which turned out to be segno appending a spurious zero codeword
+  whenever the data stream already ends on a codeword boundary — in byte mode,
+  nearly always, since the header is a fixed twelve bits. Both symbols decode
+  identically, but matching it would have meant reproducing the bug. ISO 18004
+  §7.4.10 adds padding bits only when the stream does *not* already end at a
+  boundary.
+- The comparison did earn its keep first: it caught a genuine bug in the mask
+  penalty scoring, where rule 3 was counting overlapping occurrences and demanding
+  four in-bounds light modules at the symbol edge.
+- The real check **decodes**. Every payload length from 1 to 213 bytes, plus real
+  provisioning URIs from the server's own `BuildProvisioningUri`, rendered and
+  read back — 217 symbols across all ten versions.
+- Two decoders, passing if either reads it. Not a lowered bar: each intermittently
+  fails to *locate* a valid symbol depending on render scale. OpenCV's base
+  detector missed seven that the WeChat detector read exactly, and missed one the
+  base detector read exactly. The seven looked like encoder bugs until the same
+  matrix decoded at a different scale.
+
+End to end, once: the server generated twenty secrets, the QR encoded each URI,
+an independent decoder recovered the secret byte for byte, and codes computed the
+way a phone computes them were accepted by the server's validator.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

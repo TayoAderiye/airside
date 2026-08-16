@@ -166,6 +166,10 @@ What Airside does with that:
 - **The proxy's admin API is never published.** Caddy's admin port is
   unauthenticated and can load configuration that executes commands; only the
   API container shares a network with it.
+- **A second factor is available and actually enforced.** Enrol an authenticator
+  in Settings; login then requires a code, recovery codes are burned on use, and
+  a code cannot be replayed inside its own window. Given that an Airside login is
+  a root login, this is worth the two minutes.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -223,9 +227,7 @@ Known gaps, recorded rather than hidden:
 - Notification schedules have no holiday calendar — "weekdays" includes
   Christmas Day.
 - Metric retention is hourly rollups for 90 days, with no configuration.
-- There is no way to enrol in multi-factor authentication. The login screen
-  accepts a TOTP code and the API can enrol one, but no screen calls it.
-- Twenty-five API endpoints have no dashboard screen — self-update, most domain
+- Twenty-one API endpoints have no dashboard screen — self-update, most domain
   operations, private registries, and metric charts among them. They are listed
   in [docs/dashboard-wiring-plan.md](docs/dashboard-wiring-plan.md).
 

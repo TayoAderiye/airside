@@ -1,9 +1,12 @@
 using System.Security.Claims;
 using Airside.Api.Contracts;
+using Airside.Api.Features.Operations;
 using Airside.Api.Infrastructure;
 using Airside.Api.Security;
 using Airside.Core.Audit;
 using Airside.Core.Common;
+using Airside.Core.Operations;
+using Airside.Core.Security;
 using Airside.Data;
 using Airside.Data.Entities;
 using Microsoft.AspNetCore.Authentication;
@@ -36,6 +39,8 @@ internal static class AuthEndpoints
         UserManager<AirsideUser> users,
         ClaimsFactory claimsFactory,
         IAuditWriter audit,
+        ITotp totp,
+        ISecretProtector protector,
         TimeProvider timeProvider,
         HttpContext http,
         CancellationToken ct)
@@ -75,6 +80,24 @@ internal static class AuthEndpoints
             return invalid.ToProblem();
         }
 
+        var mfa = await db.UserMfa.FirstOrDefaultAsync(m => m.UserId == user.Id, ct).ConfigureAwait(false);
+
+        // Only a confirmed enrolment gates login. An unconfirmed one is a secret
+        // the user may never have successfully scanned, and enforcing it would
+        // lock them out of the account they would have to use to fix it.
+        if (mfa?.ConfirmedAt is not null)
+        {
+            var challenge = await CheckSecondFactorAsync(
+                mfa, request.TotpCode, totp, protector, users, user, audit, http, ct).ConfigureAwait(false);
+
+            if (challenge is not null)
+            {
+                return challenge;
+            }
+
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+
         await users.ResetAccessFailedCountAsync(user).ConfigureAwait(false);
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
@@ -111,6 +134,83 @@ internal static class AuthEndpoints
         }, ct).ConfigureAwait(false);
 
         return TypedResults.Ok(await BuildCurrentUserAsync(db, user, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Validates the second factor, returning a problem to answer with or
+    /// <c>null</c> when the code is accepted.
+    /// </summary>
+    /// <remarks>
+    /// A successful check mutates <paramref name="mfa"/> — advancing the used
+    /// time step, or burning a redeemed recovery code — and the caller saves it.
+    /// Both mutations are the entire protection against replay, so neither is
+    /// optional.
+    /// </remarks>
+    private static async Task<ProblemHttpResult?> CheckSecondFactorAsync(
+        UserMfa mfa,
+        string? submitted,
+        ITotp totp,
+        ISecretProtector protector,
+        UserManager<AirsideUser> users,
+        AirsideUser user,
+        IAuditWriter audit,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        switch (MfaChallenge.Evaluate(mfa, submitted, totp, protector))
+        {
+            case MfaOutcome.Accepted:
+                return null;
+
+            case MfaOutcome.AcceptedWithRecoveryCode:
+                await audit.WriteAsync(new AuditEntry
+                {
+                    Action = "user.mfa_recovery_code_used",
+                    Result = AuditResult.Success,
+                    UserId = user.Id,
+                    UserEmailSnapshot = user.Email,
+                    ResourceKind = "user",
+                    ResourceId = user.Id,
+                    IpAddress = http.Connection.RemoteIpAddress?.ToString(),
+                    Metadata = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["remaining"] = RecoveryCodes.Remaining(mfa),
+                    },
+                }, ct).ConfigureAwait(false);
+
+                return null;
+
+            case MfaOutcome.Missing:
+                return new Error(
+                    ErrorCodes.AuthMfaRequired,
+                    "This account requires a code from your authenticator.").ToProblem();
+
+            case MfaOutcome.SecretUnreadable:
+                // The key ring was replaced, so the stored secret can never
+                // validate again. Refusing is the only safe answer — accepting
+                // the password alone would silently drop the second factor for
+                // whoever turned up after the failure.
+                await WriteFailureAsync(audit, user.Id, user.Email, http, "mfa_secret_unreadable", ct)
+                    .ConfigureAwait(false);
+
+                return new Error(
+                    ErrorCodes.AuthMfaInvalid,
+                    "The stored second factor for this account cannot be read, which usually means the Data "
+                    + "Protection key ring was replaced. Recovery requires host access.").ToProblem();
+
+            default:
+                // Counts towards lockout. Without this a six-digit code is a
+                // million guesses against an endpoint that has already accepted
+                // the password.
+                await users.AccessFailedAsync(user).ConfigureAwait(false);
+                await WriteFailureAsync(audit, user.Id, user.Email, http, "mfa_invalid_code", ct)
+                    .ConfigureAwait(false);
+
+                return new Error(
+                    ErrorCodes.AuthMfaInvalid,
+                    "That code is not valid. Check the clock on the device running your authenticator — "
+                    + "more than a minute out produces codes this server cannot accept.").ToProblem();
+        }
     }
 
     private static async Task<NoContent> LogoutAsync(

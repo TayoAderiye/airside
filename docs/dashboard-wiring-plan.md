@@ -134,7 +134,7 @@ supports them, rather than shipping two more pages of invented data.
 ## Audit: what the API offers and the dashboard never asks for
 
 Phases 1 to 5 replaced every mocked screen. That is not the same as covering the
-API. Of 79 endpoints, **25 are never called**, and some of them are features the
+API. Of 79 endpoints, **21 are never called**, and some of them are features the
 README advertises on its front page.
 
 Ordered by how badly the absence hurts.
@@ -155,12 +155,31 @@ call that joins the two containers on a shared network and injects the connectio
 as environment variables, so until it is made the application has no route to the
 database at all.
 
-### The second factor cannot be turned on
+**Two-factor authentication** is a panel in Settings: enrol, scan, confirm,
+disable. Wiring it up turned out to be the smaller half of the job.
 
-The login screen accepts a TOTP code and the API implements enrolment
-(`/account/mfa`, `/enrol`, `/confirm`, `/disable`). No screen calls any of them,
-so there is no way to enrol an authenticator. A security feature that exists on
-the server and cannot be switched on.
+The larger half was that **login never checked the code**. `LoginAsync` took a
+`totpCode` field and ignored it; nothing in the auth path read the `UserMfa`
+table at all. Enrolment stored a secret, the API reported the factor as active,
+and the password alone still signed you in. Building only the screen would have
+shipped an operator the belief that their control plane had two factors on it,
+which is worse than knowing it has one — a password gets guarded when it is the
+only thing standing there.
+
+So login now requires a code when a *confirmed* enrolment exists. An unconfirmed
+one is deliberately ignored: it may be a secret nobody successfully scanned, and
+enforcing it would lock someone out of the only account that could fix it.
+Recovery codes work in the same field, are burned on use, and the accepted time
+step is advanced so a code cannot be replayed inside its own window. A wrong code
+feeds the lockout counter, because six digits is a million guesses against an
+endpoint that has already accepted the password.
+
+The QR code is rendered in the browser by an encoder written for this
+(`lib/qr.ts`, byte mode, level M, versions 1–10). The payload contains the shared
+secret, so a hosted chart API is out of the question and a transitive dependency
+on that page is a supply chain ending at the second factor. It is checked by
+rendering every symbol and reading it back with independent decoders, not by
+looking at one that worked — see `lib/qr.verify.mjs`.
 
 ### Self-update is unreachable
 

@@ -43,7 +43,8 @@ public static class ProblemResults
     private static int StatusFor(string code) => code switch
     {
         ErrorCodes.AuthInvalidCredentials or ErrorCodes.AuthAccountLocked
-            or ErrorCodes.AuthSetupTokenInvalid => StatusCodes.Status401Unauthorized,
+            or ErrorCodes.AuthSetupTokenInvalid or ErrorCodes.AuthMfaRequired
+            or ErrorCodes.AuthMfaInvalid => StatusCodes.Status401Unauthorized,
 
         ErrorCodes.AuthPermissionDenied or ErrorCodes.WorkloadSystemProtected
             or ErrorCodes.QueryCommandRequiresElevation => StatusCodes.Status403Forbidden,

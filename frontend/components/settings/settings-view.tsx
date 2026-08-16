@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { ProblemBanner } from '@/components/problem-banner'
+import { MfaPanel } from '@/components/settings/mfa-panel'
 import { Button } from '@/components/ui/button'
 import { Field, TextInput } from '@/components/ui/field'
 import { PageHeader, Panel } from '@/components/ui/panel'
@@ -77,6 +78,8 @@ export function SettingsView() {
             <p className="mt-2 text-xs text-muted-foreground">{dashboard.checks.length} pre-flight checks on file</p>
           )}
         </Panel>
+
+        <MfaPanel />
 
         <Panel title="Users" bodyClassName="p-0">
           <ul className="divide-y divide-border">

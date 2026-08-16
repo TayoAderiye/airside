@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
 using Airside.Api.Infrastructure;
 using Airside.Core.Audit;
 using Airside.Core.Common;
@@ -31,8 +30,6 @@ public sealed record MfaStatusDto(bool Enrolled, bool Confirmed, int RecoveryCod
 
 internal static class MfaEndpoints
 {
-    private const int RecoveryCodeCount = 10;
-
     public static IEndpointRouteBuilder MapMfaEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/account/mfa").WithTags("Account").RequireAuthorization();
@@ -58,9 +55,7 @@ internal static class MfaEndpoints
         return TypedResults.Ok(new MfaStatusDto(
             mfa is not null,
             mfa?.ConfirmedAt is not null,
-            mfa is null
-                ? 0
-                : mfa.RecoveryCodeHashes.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length));
+            mfa is null ? 0 : RecoveryCodes.Remaining(mfa)));
     }
 
     /// <summary>
@@ -106,12 +101,12 @@ internal static class MfaEndpoints
         }
 
         var secret = totp.GenerateSecret();
-        var codes = GenerateRecoveryCodes();
+        var codes = RecoveryCodes.Generate();
 
         var record = existing ?? new UserMfa { Id = Guid.CreateVersion7(), UserId = userId.Value };
 
         record.EncryptedSecret = protector.Protect(new Secret(secret));
-        record.RecoveryCodeHashes = string.Join('\n', codes.Select(HashRecoveryCode));
+        record.RecoveryCodeHashes = RecoveryCodes.HashAll(codes);
         record.ConfirmedAt = null;
         record.LastUsedTimeStep = 0;
 
@@ -237,7 +232,7 @@ internal static class MfaEndpoints
 
         var accepted = secret.IsSuccess
             && (totp.TryValidate(secret.Value.Reveal(), request.Code, record.LastUsedTimeStep, out _)
-                || MatchesRecoveryCode(record, request.Code));
+                || RecoveryCodes.TryRedeem(record, request.Code));
 
         if (!accepted)
         {
@@ -261,63 +256,6 @@ internal static class MfaEndpoints
 
         return TypedResults.NoContent();
     }
-
-    /// <summary>
-    /// Recovery codes, generated from a cryptographic source.
-    /// </summary>
-    /// <remarks>
-    /// Grouped into two blocks with a hyphen, because these get written down and
-    /// typed back by hand. The alphabet omits characters that are read wrong from
-    /// paper.
-    /// </remarks>
-    private static List<string> GenerateRecoveryCodes()
-    {
-        const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
-        var codes = new List<string>(RecoveryCodeCount);
-
-        for (var i = 0; i < RecoveryCodeCount; i++)
-        {
-            var chars = new char[10];
-
-            for (var j = 0; j < chars.Length; j++)
-            {
-                chars[j] = Alphabet[RandomNumberGenerator.GetInt32(Alphabet.Length)];
-            }
-
-            codes.Add($"{new string(chars[..5])}-{new string(chars[5..])}");
-        }
-
-        return codes;
-    }
-
-    private static string HashRecoveryCode(string code) =>
-        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Normalise(code))));
-
-    private static bool MatchesRecoveryCode(UserMfa record, string candidate)
-    {
-        var hash = HashRecoveryCode(candidate);
-        var remaining = record.RecoveryCodeHashes.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
-
-        var index = remaining.FindIndex(h => CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.ASCII.GetBytes(h),
-            System.Text.Encoding.ASCII.GetBytes(hash)));
-
-        if (index < 0)
-        {
-            return false;
-        }
-
-        // Burned on use. A recovery code that still works after being used is a
-        // password written on paper.
-        remaining.RemoveAt(index);
-        record.RecoveryCodeHashes = string.Join('\n', remaining);
-
-        return true;
-    }
-
-    private static string Normalise(string code) =>
-        code.Replace("-", string.Empty, StringComparison.Ordinal).Trim().ToUpperInvariant();
 
     private static Guid? CurrentUserId(HttpContext http) =>
         Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
