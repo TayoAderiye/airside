@@ -279,9 +279,22 @@ internal static class OperationsEndpoints
         return TypedResults.Accepted($"/api/v1/system/updates", dto);
     }
 
+    /// <summary>
+    /// Archives the control-plane store and the key ring together.
+    /// </summary>
+    /// <remarks>
+    /// The filesystem failures are caught, not just the logical ones. This
+    /// writes a dump, copies the key ring, and tars the result — every step of
+    /// which throws <see cref="IOException"/> when the disk is full. Catching
+    /// only <see cref="InvalidOperationException"/> meant the most likely
+    /// failure on a small host arrived as an unhandled 500 with no message, on
+    /// the screen an operator reaches for precisely because they are worried
+    /// about losing something.
+    /// </remarks>
     private static async Task<Results<Ok<SystemBackupResult>, ProblemHttpResult>> CreateSystemBackupAsync(
         ISystemBackupProvider backups,
         UpdateOptions options,
+        ILoggerFactory loggerFactory,
         CancellationToken ct)
     {
         try
@@ -291,6 +304,23 @@ internal static class OperationsEndpoints
         catch (InvalidOperationException ex)
         {
             return new Error("backup.system_failed", ex.Message).ToProblem();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Logged as well as returned: the message names a path, and the path
+            // is the useful half when the cause is a permission rather than
+            // space.
+            loggerFactory.CreateLogger("Airside.Api.Operations.SystemBackup")
+                .LogError(ex, "Control-plane backup to {Root} failed", options.BackupRoot);
+
+            return new Error(
+                "backup.system_failed",
+                ex is IOException
+                    ? "The backup could not be written. The usual cause is no space left on the host — "
+                        + $"check `df -h` and the free space under {options.BackupRoot}. ({ex.Message})"
+                    : $"The backup could not be written to {options.BackupRoot}: permission denied. The "
+                        + $"control plane runs as a non-root user and must own that directory. ({ex.Message})")
+                .ToProblem();
         }
     }
 }
