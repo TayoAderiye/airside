@@ -3,9 +3,20 @@ name: Release
 # Tag-driven, and only tags. A release is a deliberate act with a version number
 # attached — publishing on every push to main would mean the tag Airside's own
 # updater rolls back to could move under it.
+#
+# Two tag shapes, because the dashboard ships as its own image:
+#
+#   v0.2.0     both images, which is the normal release
+#   ui-v0.1.3  the dashboard alone, for a UI fix that needs no platform release
+#
+# The second is the reason the containers are separate at all. It is deliberately
+# limited to a patch bump: the dashboard compares major.minor against the API on
+# load and refuses to render against a different one, so publishing a dashboard
+# outside the API's series would produce an image that cannot be used, and the
+# check below refuses to build it.
 on:
   push:
-    tags: ['v*.*.*']
+    tags: ['v*.*.*', 'ui-v*.*.*']
 
   # Available by hand so the first image can be pushed and pulled before anything
   # is tagged. It builds and pushes the same way; only the trigger differs.
@@ -14,6 +25,12 @@ on:
       version:
         description: 'Version to publish, without the leading v (e.g. 0.1.0)'
         required: true
+      target:
+        description: 'Which images to publish'
+        required: true
+        default: both
+        type: choice
+        options: [both, ui]
 
 permissions:
   contents: read
@@ -51,35 +68,90 @@ jobs:
           AIRSIDE_REQUIRE_DOCKER: '1'
         run: dotnet test --no-build -c Release
 
+  verify-ui:
+    # The dashboard's own gate. Type checking is on, and it is checking types
+    # generated from the API's OpenAPI document — so a failure here usually means
+    # the UI and the API have genuinely drifted, not that someone mistyped.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: frontend
+        run: pnpm build
+
   prepare:
-    # Version and owner are worked out once. With a build matrix they would
-    # otherwise be recomputed per architecture, and a mismatch between two
+    # Version, owner and the build matrix are worked out once. With a matrix they
+    # would otherwise be recomputed per architecture, and a mismatch between two
     # supposedly identical answers is not a failure anyone would think to look for.
-    needs: verify
+    needs: [verify, verify-ui]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
       owner: ${{ steps.v.outputs.owner }}
+      matrix: ${{ steps.v.outputs.matrix }}
+      images: ${{ steps.v.outputs.images }}
     steps:
       - uses: actions/checkout@v4
 
       - id: v
         run: |
+          set -euo pipefail
+
           if [ -n "${{ inputs.version }}" ]; then
             version="${{ inputs.version }}"
+            target="${{ inputs.target }}"
+          elif [ "${GITHUB_REF_NAME}" != "${GITHUB_REF_NAME#ui-v}" ]; then
+            version="${GITHUB_REF_NAME#ui-v}"
+            target="ui"
           else
             version="${GITHUB_REF_NAME#v}"
+            target="both"
           fi
+
+          api_declared=$(grep -oE '<VersionPrefix>[^<]+' Directory.Build.props | cut -d'>' -f2)
+          ui_declared=$(node -p "require('./frontend/package.json').version")
 
           # The version in the tag has to match the one compiled into the binary,
           # or `airside status` reports a version the image is not, and the
           # updater compares against the wrong thing.
-          declared=$(grep -oE '<VersionPrefix>[^<]+' Directory.Build.props | cut -d'>' -f2)
-
-          if [ "$version" != "$declared" ]; then
-            echo "Tag says $version but Directory.Build.props says $declared." >&2
+          if [ "$target" = "both" ] && [ "$version" != "$api_declared" ]; then
+            echo "Tag says $version but Directory.Build.props says $api_declared." >&2
             echo "Update VersionPrefix and deploy/install.sh together, then retag." >&2
             exit 1
+          fi
+
+          if [ "$version" != "$ui_declared" ]; then
+            echo "Tag says $version but frontend/package.json says $ui_declared." >&2
+            echo "The dashboard bakes its own version in from package.json, so the two must agree." >&2
+            exit 1
+          fi
+
+          # A dashboard released on its own must stay inside the API's
+          # major.minor series. Outside it, the version check in the dashboard
+          # refuses to render — so publishing it would produce an image that
+          # cannot be used by anyone, discovered only after the release.
+          if [ "$target" = "ui" ]; then
+            series() { printf '%s' "$1" | cut -d. -f1,2; }
+
+            if [ "$(series "$version")" != "$(series "$api_declared")" ]; then
+              echo "A dashboard-only release must share the API's major.minor series." >&2
+              echo "Tag is $version; the API is $api_declared." >&2
+              echo "Release both together with a v${version} tag instead." >&2
+              exit 1
+            fi
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -89,23 +161,47 @@ jobs:
           # Actions expressions have no lowercase function, hence shell.
           echo "owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+          if [ "$target" = "ui" ]; then
+            images='["airside-ui"]'
+          else
+            images='["airside","airside-ui"]'
+          fi
+
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+
+          # One matrix entry per image and architecture. Built here rather than
+          # written out twice, so the two lists cannot disagree about which
+          # images exist.
+          matrix=$(jq -cn --argjson images "$images" '
+            {include: [
+              $images[] as $image |
+              [{platform:"linux/amd64", runner:"ubuntu-latest"},
+               {platform:"linux/arm64", runner:"ubuntu-24.04-arm"}][] as $arch |
+              {
+                image: $image,
+                platform: $arch.platform,
+                runner: $arch.runner,
+                dockerfile: (if $image == "airside" then "deploy/Dockerfile" else "deploy/Dockerfile.ui" end),
+                context: (if $image == "airside" then "." else "frontend" end)
+              }
+            ]}')
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   build:
-    # One job per architecture, each on its own native runner. The alternative is
-    # QEMU emulation on a single amd64 host, and a .NET publish under emulation is
-    # slow enough to be its own problem — several times the wall clock, for a build
-    # that already runs on every release.
+    # One job per image and architecture, each on its own native runner. The
+    # alternative is QEMU emulation on a single amd64 host, and a .NET publish
+    # under emulation is slow enough to be its own problem — several times the
+    # wall clock, for a build that already runs on every release.
     #
     # Each job pushes an untagged image and reports its digest; nothing is tagged
-    # until both have succeeded, so a half-published multi-arch tag cannot exist.
+    # until all of them have succeeded, so a half-published multi-arch tag cannot
+    # exist, and neither can a release where the API published and the dashboard
+    # did not.
     needs: prepare
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -126,20 +222,20 @@ jobs:
         id: push
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: deploy/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Apache-2.0
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/airside,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
 
-          # Per-architecture cache. Sharing one scope between them makes each run
-          # evict the other's layers, which costs more than the cache saves.
-          cache-from: type=gha,scope=${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+          # Per-image, per-architecture cache. Sharing one scope makes each run
+          # evict the others' layers, which costs more than the cache saves.
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.platform }}
 
       - name: Hand the digest to the merge step
         run: |
@@ -153,22 +249,26 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: digest-${{ steps.platform.outputs.pair }}
+          name: digest-${{ matrix.image }}-${{ steps.platform.outputs.pair }}
           path: /tmp/digests/*
           retention-days: 1
 
   merge:
-    # The tag is created here, from both digests at once. Until this runs, the
+    # The tags are created here, from both digests at once. Until this runs, the
     # images exist in the registry but no tag points at them — so a failure in
     # either architecture leaves the previous release untouched rather than
     # publishing a tag that resolves on one platform and not the other.
     needs: [prepare, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.prepare.outputs.images) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
-          pattern: digest-*
+          pattern: digest-${{ matrix.image }}-*
           merge-multiple: true
 
       - uses: docker/setup-buildx-action@v3
@@ -182,7 +282,7 @@ jobs:
       - name: Create the manifest list
         working-directory: /tmp/digests
         run: |
-          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/airside"
+          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}"
 
           # No ":latest". Airside's updater rewrites an explicit tag and rolls back
           # by digest; a floating tag would make "the previous version" meaningless,
@@ -191,12 +291,10 @@ jobs:
             --tag "$image:${{ needs.prepare.outputs.version }}" \
             $(printf "$image@sha256:%s " *)
 
-      - name: Confirm both architectures are present and the image runs
+      - name: Confirm both architectures are present
         run: |
-          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/airside:${{ needs.prepare.outputs.version }}"
+          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}"
 
-          # A published image that will not start is the worst possible release,
-          # and the installer is the only other thing that would find out.
           docker buildx imagetools inspect "$image"
 
           # --raw, because the default format returns the index's own descriptor
@@ -212,5 +310,30 @@ jobs:
               || { echo "$image has no linux/$arch entry"; echo "$raw"; exit 1; }
           done
 
-          docker run --rm --platform linux/amd64 --entrypoint dotnet "$image" Airside.Api.dll --version || true
           echo "Published $image for linux/amd64 and linux/arm64"
+
+      - name: Confirm the image runs
+        # A published image that will not start is the worst possible release,
+        # and the installer is the only other thing that would find out.
+        run: |
+          image="${{ env.REGISTRY }}/${{ needs.prepare.outputs.owner }}/${{ matrix.image }}:${{ needs.prepare.outputs.version }}"
+
+          if [ "${{ matrix.image }}" = "airside" ]; then
+            docker run --rm --platform linux/amd64 --entrypoint dotnet "$image" Airside.Api.dll --version || true
+          else
+            # The dashboard has no --version flag, so it is started and asked for
+            # a page. This also catches the failure the Dockerfile exists to
+            # avoid: standalone output that never had .next/static copied into it
+            # starts perfectly well and serves unstyled HTML.
+            docker run -d --platform linux/amd64 --name ui-check -p 3000:3000 "$image"
+
+            for _ in $(seq 1 30); do
+              if curl -sf -o /dev/null http://127.0.0.1:3000/login; then ready=1; break; fi
+              sleep 1
+            done
+
+            docker logs ui-check
+            docker rm -f ui-check
+
+            [ "${ready:-0}" = "1" ] || { echo "the dashboard did not serve /login"; exit 1; }
+          fi

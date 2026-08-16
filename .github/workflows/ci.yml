@@ -34,6 +34,36 @@ jobs:
         # The runner has a Docker daemon; these exercise the real runtime.
         run: dotnet test --no-build -c Release --filter "Category=Integration"
 
+  frontend:
+    # The dashboard is built here rather than only at release time. It ships as
+    # its own image on its own tag, so without this a broken build is discovered
+    # by whoever cuts the release — after the tag exists.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install
+        # Frozen, so a lockfile that has drifted from package.json fails here
+        # rather than resolving to something no one has run locally.
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        # `next build` type-checks as part of the build. Those types are
+        # generated from the API's OpenAPI document, so an error here is usually
+        # the UI and the API having genuinely drifted apart — which is exactly
+        # what the version check at runtime exists to stop reaching an operator.
+        working-directory: frontend
+        run: pnpm build
+
   migrations:
     # Airside supports two providers and EF Core emits provider-specific DDL. A
     # migration that lands for Postgres and not SQLite breaks the SQLite install,
