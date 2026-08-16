@@ -211,12 +211,28 @@ internal static class ApplicationEndpoints
         var log = await db.DeploymentLogs.AsNoTracking()
             .FirstOrDefaultAsync(l => l.DeploymentId == id, ct).ConfigureAwait(false);
 
-        // Plain text, not JSON. A build log is read by a human looking for the
-        // line that failed, and wrapping it in a JSON string doubles its size and
-        // escapes every newline.
-        return log is null
-            ? TypedResults.NotFound()
-            : TypedResults.Text(log.Content, "text/plain; charset=utf-8");
+        if (log is not null)
+        {
+            // Plain text, not JSON. A build log is read by a human looking for
+            // the line that failed, and wrapping it in a JSON string doubles its
+            // size and escapes every newline.
+            return TypedResults.Text(log.Content, "text/plain; charset=utf-8");
+        }
+
+        // No log row is not the same as no deployment. A build that has not
+        // produced output yet has none, and a deployment from a prebuilt image
+        // never will — so 404 here made a screen polling for progress emit a
+        // failed request every two seconds, forever, against a deployment that
+        // was working perfectly.
+        //
+        // 404 is reserved for the deployment itself being absent, which is the
+        // only case a caller can do anything about.
+        var exists = await db.Deployments.AsNoTracking()
+            .AnyAsync(d => d.Id == id, ct).ConfigureAwait(false);
+
+        return exists
+            ? TypedResults.Text(string.Empty, "text/plain; charset=utf-8")
+            : TypedResults.NotFound();
     }
 
     private static async Task<Results<Accepted<JobAccepted>, ProblemHttpResult>> RollbackAsync(

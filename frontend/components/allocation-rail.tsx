@@ -61,9 +61,9 @@ export function AllocationRail({
   const overCommit = allocated > capacity
 
   return (
-    <div className={cn('flex flex-col gap-2', className)}>
+    <div className={cn('flex flex-col gap-1.5', className)}>
       <div className="flex items-baseline justify-between">
-        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="text-xs font-medium text-foreground">{label}</span>
         <span className="font-mono text-xs text-muted-foreground">
           <span className={ut.text}>{fmt(used)}</span>
           {' / '}
@@ -73,7 +73,7 @@ export function AllocationRail({
 
       {/* The rail. Full width == capacity. */}
       <div
-        className="relative h-6 w-full overflow-visible rounded-md border border-border bg-secondary"
+        className="relative h-5 w-full overflow-visible rounded-md border border-border bg-secondary"
         role="img"
         aria-label={`${label}: used ${fmt(used)} of ${fmt(capacity)} ${unit}, allocated ${fmt(allocated)} ${unit}`}
       >

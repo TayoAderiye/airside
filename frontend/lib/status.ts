@@ -55,31 +55,31 @@ export const KIND_CLASSES: Record<
     dot: 'bg-running',
     text: 'text-running',
     bg: 'bg-running-soft',
-    border: 'border-running/40',
+    border: 'border-running/25',
   },
   degraded: {
     dot: 'bg-degraded',
     text: 'text-degraded',
     bg: 'bg-degraded-soft',
-    border: 'border-degraded/40',
+    border: 'border-degraded/25',
   },
   failed: {
     dot: 'bg-failed',
     text: 'text-failed',
     bg: 'bg-failed-soft',
-    border: 'border-failed/40',
+    border: 'border-failed/25',
   },
   stopped: {
     dot: 'bg-stopped',
     text: 'text-stopped',
     bg: 'bg-stopped-soft',
-    border: 'border-stopped/40',
+    border: 'border-stopped/25',
   },
   transitional: {
     dot: 'bg-transitional',
     text: 'text-transitional',
     bg: 'bg-transitional-soft',
-    border: 'border-transitional/40',
+    border: 'border-transitional/25',
   },
 }
 

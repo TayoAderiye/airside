@@ -826,6 +826,54 @@ a socket would carry the same full string each time.
 
 ---
 
+## A redesign, and two bugs it did not cause — **done**
+
+The dashboard was restyled: a four-step surface scale on a cooler near-black, an
+accent of its own, tighter density, skeletons while loading. The palette work was
+sound — every text pair clears WCAG AA, `muted-foreground` at 11px included, and
+the five status hues stay separable on their badges.
+
+What it did not fix, because it predated it, was **border contrast**. Measured
+rather than judged:
+
+| | before | after |
+|---|---|---|
+| control boundary vs card | 1.32:1 | **3.22:1** |
+| panel edge vs card | 1.32:1 | 1.40:1 |
+
+The two are now separate tokens on purpose. `--input` draws things you operate —
+text fields, outline buttons, the log filter — and their fill sits within 1.1:1
+of the surface behind them, so the boundary is the only thing identifying them as
+controls. WCAG 1.4.11 asks 3:1 for that, and 0.35 alpha is the smallest value
+clearing it against the lightest surface. `--border` draws panel edges and
+dividers, which are not controls and are held to no floor: a hard outline around
+every card is what makes a dense dashboard look like a spreadsheet.
+
+### Two bugs shipped in 0.1.12, found by looking at the network panel
+
+Both mine, both in the build-log feature released an hour earlier.
+
+**The flusher shared the job's `DbContext`.** It ran on a timer, on another
+thread, through the handler's `IApplicationStore` — the same scoped context the
+deployment was using. EF Core's context is not thread-safe, and because the
+exception surfaced when awaiting the task in a `finally`, a cosmetic log flush
+could fail an entire deployment. Each flush now takes its own DI scope, and the
+loop swallows everything except cancellation: nothing it does is worth failing a
+deployment for.
+
+**A working deployment emitted a failed request every two seconds.** The log row
+is created only when there is output to put in it, and the endpoint answered 404
+until then — so the screen polling to show progress hammered 404s for the length
+of every build, and forever for a deployment from a prebuilt image, which never
+produces output at all. 404 is now reserved for the deployment itself being
+absent, which is the only case a caller can act on.
+
+The second one is the same mistake as the Caddy fallback route two releases
+earlier: **a log full of errors that mean nothing teaches the reader that errors
+there mean nothing.** It went out anyway, one release after I wrote that down.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

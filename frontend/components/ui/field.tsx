@@ -46,7 +46,7 @@ export function Hint({ tone = 'muted', children }: { tone?: 'muted' | 'warn'; ch
 }
 
 const controlBase =
-  'w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50'
+  'w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50'
 
 export function TextInput({
   className,

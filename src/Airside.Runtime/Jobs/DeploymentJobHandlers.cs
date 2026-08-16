@@ -4,6 +4,7 @@ using Airside.Core.Jobs;
 using Airside.Core.Naming;
 using Airside.Core.Workloads;
 using Airside.Runtime.Applications;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Airside.Runtime.Jobs;
@@ -119,6 +120,7 @@ public sealed class DeployHandler(
     GitSource git,
     Core.Proxy.IProxyManager proxy,
     IRegistryCredentialSource registries,
+    IServiceScopeFactory scopeFactory,
     ILogger<DeployHandler> logger) : IJobHandler
 {
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromMinutes(5);
@@ -180,23 +182,49 @@ public sealed class DeployHandler(
         // screen showed "Building image, 25%" and nothing else for the whole of
         // it, which is indistinguishable from a hung build. Flushing on a timer
         // lets the dashboard show the output while it is still happening.
+        //
+        // Each flush takes its own DI scope, and therefore its own DbContext.
+        // The first version of this reused the handler's IApplicationStore,
+        // which shares the job's scoped context with everything else running
+        // here — and EF Core's context is not thread-safe. Two operations on it
+        // at once throw, and because the exception surfaced when awaiting this
+        // task in the finally below, a cosmetic log flush could fail the whole
+        // deployment.
         using var flushing = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         var flusher = Task.Run(
             async () =>
             {
-                try
+                while (!flushing.IsCancellationRequested)
                 {
-                    while (!flushing.IsCancellationRequested)
+                    try
                     {
                         await Task.Delay(BuildLogFlushInterval, flushing.Token).ConfigureAwait(false);
-                        await store.AppendBuildLogAsync(payload.DeploymentId, SnapshotBuildLog(), flushing.Token)
+
+                        using var scope = scopeFactory.CreateScope();
+
+                        await scope.ServiceProvider.GetRequiredService<IApplicationStore>()
+                            .AppendBuildLogAsync(payload.DeploymentId, SnapshotBuildLog(), flushing.Token)
                             .ConfigureAwait(false);
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    // The build finished, and the caller writes the final copy.
+                    catch (OperationCanceledException)
+                    {
+                        // The build finished; the caller writes the final copy.
+                        return;
+                    }
+#pragma warning disable CA1031
+                    catch (Exception ex)
+#pragma warning restore CA1031
+                    {
+                        // Nothing this loop does is worth failing a deployment
+                        // for. The build is still running, the final write still
+                        // happens, and the operator loses at most a progress
+                        // update they were watching out of impatience.
+                        logger.LogWarning(
+                            ex,
+                            "Could not flush the partial build log for deployment {DeploymentId}",
+                            payload.DeploymentId);
+                    }
                 }
             },
             CancellationToken.None);

@@ -38,7 +38,7 @@
       rewrites the image tag that carries it — a version that disagrees with the
       tag is how a rollback targets the wrong build.
     -->
-    <VersionPrefix>0.1.12</VersionPrefix>
+    <VersionPrefix>0.1.13</VersionPrefix>
 
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>
     <AssemblyName>$(MSBuildProjectName)</AssemblyName>

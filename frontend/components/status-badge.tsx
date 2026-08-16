@@ -62,7 +62,7 @@ export function StatusBadge({
     <span
       role="status"
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-xs font-medium tracking-tight',
+        'inline-flex items-center gap-1.5 rounded-md border px-1.5 py-px font-mono text-[11px] font-medium tracking-tight transition-colors duration-200',
         c.bg,
         c.border,
         c.text,

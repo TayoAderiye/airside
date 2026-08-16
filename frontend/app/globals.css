@@ -11,6 +11,8 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-overlay: var(--overlay);
+  --color-overlay-foreground: var(--overlay-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
@@ -47,45 +49,78 @@
   --radius-xl: calc(var(--radius) + 6px);
 }
 
+/*
+  Night apron — cool near-black, one taxiway-blue accent.
+
+  Surfaces lift by luminance (and a hair of cool blue), not by a flatter grey.
+  Borders are low-alpha white so they sit on every surface without a Primer
+  hairline. Status hues are reserved for state; they are not decoration.
+*/
 :root {
   color-scheme: dark;
 
-  --background: #0e1116;
-  --foreground: #e6edf3;
-  --card: #161b22;
-  --card-foreground: #e6edf3;
-  --popover: #12161c;
-  --popover-foreground: #e6edf3;
+  /* base → card → popover → overlay */
+  --background: #07080b;
+  --foreground: #e8eef4;
+  --card: #10141a;
+  --card-foreground: #e8eef4;
+  --popover: #161b23;
+  --popover-foreground: #e8eef4;
+  --overlay: #1c222c;
+  --overlay-foreground: #e8eef4;
 
-  --primary: #58a6ff;
-  --primary-foreground: #06101f;
-  --secondary: #1c232d;
-  --secondary-foreground: #e6edf3;
-  --muted: #1c232d;
-  --muted-foreground: #8b949e;
-  --accent: #1c232d;
-  --accent-foreground: #e6edf3;
+  --primary: #6eb6ff;
+  --primary-foreground: #061018;
+  --secondary: #161c25;
+  --secondary-foreground: #e8eef4;
+  --muted: #161c25;
+  --muted-foreground: #87919d;
+  --accent: #161c25;
+  --accent-foreground: #e8eef4;
 
-  --destructive: #f85149;
-  --destructive-foreground: #0e1116;
+  --destructive: #f4727a;
+  --destructive-foreground: #07080b;
 
-  --border: #2a313c;
-  --input: #2a313c;
-  --ring: #58a6ff;
+  /*
+    Two weights, because they do different jobs.
+
+    --border draws panel edges and dividers. A panel is not a control, so it is
+    not held to WCAG 1.4.11's 3:1 — it only has to be visible, and a hard
+    outline around every card is what makes a dense dashboard look like a
+    spreadsheet.
+
+    --input draws the boundary of things you can operate: text fields, outline
+    buttons, the log filter. That boundary is the only thing identifying them as
+    controls — their fill sits within 1.1:1 of the surface behind them — so it
+    does have to clear 3:1. 0.35 is the smallest alpha that manages it against
+    the lightest surface (--overlay); anything subtler leaves a field you have
+    to hunt for.
+  */
+  --border: rgb(255 255 255 / 0.12);
+  --input: rgb(255 255 255 / 0.35);
+  --ring: #6eb6ff;
 
   --radius: 0.375rem;
 
-  /* Status hues — mutually separable, colour is redundant reinforcement */
-  --status-running: #3fb950;
-  --status-running-soft: #12351d;
-  --status-degraded: #d29922;
-  --status-degraded-soft: #3a2c0c;
-  --status-failed: #f85149;
-  --status-failed-soft: #3d1618;
-  --status-stopped: #8b949e;
-  --status-stopped-soft: #232a33;
-  --status-transitional: #a371f7;
-  --status-transitional-soft: #291d43;
+  --elev-card: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.35);
+  --elev-popover: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 8px 28px rgb(0 0 0 / 0.5);
+  --elev-overlay: 0 16px 48px rgb(0 0 0 / 0.6);
+
+  /*
+    Status hues — mutually separable, colour is redundant reinforcement.
+    Green / gold / rose / slate / violet stay distinct under deuteranopia
+    when paired with the badge's shape + label.
+  */
+  --status-running: #3ecf8e;
+  --status-running-soft: #0c2418;
+  --status-degraded: #e6b84d;
+  --status-degraded-soft: #2a2108;
+  --status-failed: #f4727a;
+  --status-failed-soft: #2d1216;
+  --status-stopped: #8b95a3;
+  --status-stopped-soft: #1a1e24;
+  --status-transitional: #b784f0;
+  --status-transitional-soft: #22183a;
 }
 
 @layer base {
@@ -101,6 +136,18 @@
     outline: 2px solid var(--ring);
     outline-offset: 2px;
     border-radius: 2px;
+  }
+}
+
+@layer utilities {
+  .elev-card {
+    box-shadow: var(--elev-card);
+  }
+  .elev-popover {
+    box-shadow: var(--elev-popover);
+  }
+  .elev-overlay {
+    box-shadow: var(--elev-overlay);
   }
 }
 
@@ -131,6 +178,26 @@
   animation: stream-blink 1s steps(2, start) infinite;
 }
 
+/* Quiet shimmer for loading placeholders — never used to fake live data */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.animate-skeleton {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    color-mix(in oklab, var(--foreground) 8%, var(--muted)) 50%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -144,6 +211,11 @@
   .animate-stream-blink {
     animation: none !important;
     opacity: 1 !important;
+  }
+  .animate-skeleton {
+    animation: none !important;
+    background-image: none !important;
+    background-color: var(--muted);
   }
 }
 
