@@ -175,7 +175,25 @@ public sealed class ProxyReconciliationService(
             await proxy.ApplyTlsPolicyAsync(policy, ct).ConfigureAwait(false);
 
             await ReloadCertificatesAsync(store, wanted, ct).ConfigureAwait(false);
-            await RemoveOrphansAsync(actual, routable, ct).ConfigureAwait(false);
+
+            // The dashboard's hostnames are named explicitly because orphan
+            // removal decides what to keep by looking in Domains, and these live
+            // in InstanceSettings. Without this the route Airside had just
+            // asserted was deleted again on the very next pass — every two
+            // minutes — as a route it created for a domain that no longer exists.
+            var protectedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrEmpty(settings.DashboardDomain))
+            {
+                protectedHosts.Add(settings.DashboardDomain);
+            }
+
+            if (!string.IsNullOrEmpty(settings.PreviousDashboardDomain))
+            {
+                protectedHosts.Add(settings.PreviousDashboardDomain);
+            }
+
+            await RemoveOrphansAsync(actual, routable, protectedHosts, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -296,10 +314,21 @@ public sealed class ProxyReconciliationService(
     private async Task RemoveOrphansAsync(
         IReadOnlyList<ObservedRoute> actual,
         List<DomainTarget> routable,
+        HashSet<string> protectedHosts,
         CancellationToken ct)
     {
         foreach (var route in actual)
         {
+            // Hostnames Airside owns that are not domains — the dashboard's own,
+            // and the previous one during its grace period. They are asserted
+            // from InstanceSettings and would otherwise be withdrawn here as
+            // routes with no matching domain, which is how an operator ended up
+            // locked out of the interface two minutes after setting a domain.
+            if (protectedHosts.Contains(route.Hostname))
+            {
+                continue;
+            }
+
             var matched = routable.Exists(d =>
                 string.Equals(d.Hostname, route.Hostname, StringComparison.OrdinalIgnoreCase));
 
