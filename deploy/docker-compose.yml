@@ -66,10 +66,19 @@ services:
       # The key ring MUST outlive the container. If it is lost, every stored
       # secret becomes undecryptable — which would happen on the first
       # self-update if it lived inside the image.
-      - /var/lib/airside/keys:/var/lib/airside/keys
-      - /var/lib/airside/data:/var/lib/airside/data
-      - /var/lib/airside/volumes:/var/lib/airside/volumes
-      - /var/lib/airside/backups:/var/lib/airside/backups
+      # The whole directory, not the four subdirectories inside it.
+      #
+      # Two files live at its root and were therefore invisible to this
+      # container: state.json, which the updater writes before every step
+      # precisely so it survives the container being replaced, and domain-reset,
+      # the escape hatch for an operator locked out by a bad dashboard domain.
+      #
+      # Mounting only the subdirectories meant the updater wrote its recovery
+      # state to a filesystem destroyed by the event it exists to survive, and
+      # that touching the reset file on the host did nothing at all — the API
+      # restarted, looked inside its own container, found no file, and carried on
+      # with the domain that had locked the operator out.
+      - /var/lib/airside:/var/lib/airside
 
       # The API runs in a container, so its own /proc describes the container,
       # not the machine. Without these, host capacity reads as the API's own
