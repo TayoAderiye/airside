@@ -448,6 +448,37 @@ deploying an application on that host found three more:
   are required by every engine that has the concept and rejected outright by
   those that do not, so the fix is per-engine rather than "send them always".
 
+### Then attaching a domain
+
+Five more, and together they made setting a dashboard domain a way to lock
+yourself out of the machine.
+
+- **Reconciliation deleted the dashboard's own route every two minutes.**
+  `RemoveOrphansAsync` withdraws routes Airside created that match no domain in
+  `Domains`. The dashboard's hostname is in `InstanceSettings`, so it matched
+  nothing and looked exactly like a leftover from a deleted domain. The
+  dashboard worked, then stopped, then worked again when the route was added by
+  hand, then stopped again — on a timer.
+- **The route was never reasserted** after the proxy container was replaced, for
+  the same reason: the reconciliation loop walks `Domains` and never sees it.
+- **`/var/lib/airside` was not mounted** — only four directories inside it. Two
+  files live at its root: `state.json`, which the updater writes *specifically*
+  so it survives the container being replaced, and `domain-reset`, the escape
+  hatch for exactly this lockout. Neither was visible to the container, so the
+  rollback state was written to a filesystem the update destroys, and touching
+  the reset file on the host did nothing at all.
+- **Inserting a route failed against an empty list.** Keeping the catch-all last
+  meant inserting real routes at index 0, and Caddy answers an empty array with
+  `array index out of bounds: 0` — the state a replaced proxy boots into. Self
+  inflicted, and it defeated the fix above until it was caught.
+- **The `airside` CLI is never installed on the host.** The documented recovery
+  path did not exist.
+
+Worth stating plainly: the first four were all found by one operator setting a
+domain and watching it break intermittently. None of them would have shown up in
+a test suite, because each depends on the passage of time or the replacement of
+a container.
+
 Still open from that run, none of them blocking:
 
 - `Cannot load library libgssapi_krb5.so.2` at startup — Npgsql probing for
