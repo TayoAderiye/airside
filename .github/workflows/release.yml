@@ -199,10 +199,17 @@ jobs:
           # and the installer is the only other thing that would find out.
           docker buildx imagetools inspect "$image"
 
+          # --raw, because the default format returns the index's own descriptor
+          # rather than its entries, so a per-architecture check against it always
+          # finds nothing and fails a release that actually published correctly.
+          #
+          # buildx also attaches attestation manifests carrying
+          # architecture "unknown"; those are expected and ignored.
+          raw=$(docker buildx imagetools inspect "$image" --raw)
+
           for arch in amd64 arm64; do
-            docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' \
-              | grep -q "\"architecture\":\"$arch\"" \
-              || { echo "$image has no linux/$arch entry"; exit 1; }
+            echo "$raw" | grep -q "\"architecture\": *\"$arch\"" \
+              || { echo "$image has no linux/$arch entry"; echo "$raw"; exit 1; }
           done
 
           docker run --rm --platform linux/amd64 --entrypoint dotnet "$image" Airside.Api.dll --version || true
