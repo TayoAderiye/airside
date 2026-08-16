@@ -12,7 +12,19 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
-    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!--
+      Pinned to a version, not "latest". With TreatWarningsAsErrors on,
+      "latest-recommended" means the rule set moves with whatever SDK feature band
+      the machine happens to have — so CI on 10.0.400 failed on CA1873 while a
+      contributor on 10.0.100 could not reproduce it, because the rule did not
+      exist there.
+
+      This is the same reason Airside refuses a floating image tag: a version that
+      moves on its own turns a routine build into an unplanned upgrade. Raising
+      this number is a deliberate act, and whatever new rules appear get fixed
+      then.
+    -->
+    <AnalysisLevel>10.0-recommended</AnalysisLevel>
 
     <!-- Airside runs in a Linux container with a fixed locale. -->
     <InvariantGlobalization>true</InvariantGlobalization>

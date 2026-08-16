@@ -49,6 +49,18 @@ dotnet_code_quality.CA1711.allowed_suffixes = Queue|Permission
 # a profiler ever says otherwise.
 dotnet_diagnostic.CA1848.severity = none
 
+# CA1873: an argument to a log call may be expensive to evaluate when logging is
+# disabled. The same concern as CA1848 above, and the same answer — but this one
+# needs saying because the rule fires on 38 sites and every one of them passes a
+# local variable or a property read. Nothing computes, allocates, or interpolates.
+#
+# The rule cannot tell a property read from a database call, so at `recommended`
+# severity with TreatWarningsAsErrors it turns every structured log statement into
+# a build error. Guarding each one with IsEnabled would add 38 blocks of noise
+# protecting nothing. If a genuinely expensive argument ever appears, the fix is
+# to hoist it, not to re-enable a rule that cannot distinguish the two.
+dotnet_diagnostic.CA1873.severity = none
+
 [tests/**/*.cs]
 # CA1707 forbids underscores in member names. Test methods follow
 # MethodName_Scenario_ExpectedOutcome (CONVENTIONS.md §10), where the underscores
