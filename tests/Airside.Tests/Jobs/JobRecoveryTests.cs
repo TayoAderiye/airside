@@ -31,16 +31,30 @@ namespace Airside.Tests.Jobs;
 /// </remarks>
 public sealed class JobRecoveryTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
+    private readonly string _path;
     private readonly DbContextOptions<AirsideDbContext> _options;
 
+    /// <summary>
+    /// A file database, not <c>:memory:</c>.
+    /// </summary>
+    /// <remarks>
+    /// In-memory SQLite only shares data between contexts that share one
+    /// connection, and this test runs a background dispatcher polling on its own
+    /// thread while the assertions poll on another. Two DbContexts over a single
+    /// connection is not safe, and it fails as
+    /// "unable to delete/modify user-function due to active statements" — which
+    /// says nothing about concurrency and appears only when the timing lands
+    /// badly, so it passed here for weeks and failed on CI.
+    ///
+    /// A file lets every context open its own connection, which is what the
+    /// production code does too.
+    /// </remarks>
     public JobRecoveryTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
+        _path = Path.Combine(Path.GetTempPath(), $"airside-jobs-{Guid.CreateVersion7():N}.db");
 
         _options = new DbContextOptionsBuilder<AirsideDbContext>()
-            .UseSqlite(_connection, o => o.MigrationsAssembly("Airside.Data.Migrations.Sqlite"))
+            .UseSqlite($"Data Source={_path}", o => o.MigrationsAssembly("Airside.Data.Migrations.Sqlite"))
             .Options;
 
         using var db = NewContext();
@@ -111,7 +125,7 @@ public sealed class JobRecoveryTests : IDisposable
         var services = new ServiceCollection();
 
         services.AddDbContext<AirsideDbContext>(o =>
-            o.UseSqlite(_connection, s => s.MigrationsAssembly("Airside.Data.Migrations.Sqlite")));
+            o.UseSqlite($"Data Source={_path}", s => s.MigrationsAssembly("Airside.Data.Migrations.Sqlite")));
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<JobSignal>();
         services.AddSingleton<IJobProgressObserver, SilentObserver>();
@@ -138,7 +152,19 @@ public sealed class JobRecoveryTests : IDisposable
         Assert.Fail("The dispatcher did not reach a settled state within 15 seconds.");
     }
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose()
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        try
+        {
+            File.Delete(_path);
+        }
+        catch (IOException)
+        {
+            // A leaked temp file is a nuisance, not a test failure.
+        }
+    }
 
     private sealed class RecordingHandler : IJobHandler
     {
