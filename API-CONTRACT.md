@@ -31,8 +31,9 @@ string-encoded integers are needed, and none are used.
 
 Cookie-based. `POST /api/v1/auth/login` sets an `HttpOnly`, `Secure`,
 `SameSite=Strict` session cookie; every subsequent request carries it
-automatically, including the SignalR handshake. There is no bearer token and no
-token in JavaScript's reach.
+automatically, including on `EventSource` connections. There is no bearer token
+and no token in JavaScript's reach — which is also why the live streams need no
+authentication scheme of their own.
 
 Unauthenticated requests get `401`. Authenticated requests missing a permission
 get `403`. A resource that exists but is not visible to the caller gets `404`,
@@ -103,12 +104,12 @@ Location: /api/v1/jobs/019559e2-...
   "jobType": "database.provision",
   "workloadId": "019559e2-7c31-7a44-b2f1-6c9e0a3d5e0f",
   "statusUrl": "/api/v1/jobs/019559e2-7c31-7a44-b2f1-6c9e0a3d5e10",
-  "hubTopic": "job:019559e2-7c31-7a44-b2f1-6c9e0a3d5e10"
+  "eventsUrl": "/api/v1/jobs/019559e2-7c31-7a44-b2f1-6c9e0a3d5e10/events"
 }
 ```
 
-The client subscribes to `hubTopic` on the jobs hub for live progress, and falls
-back to polling `statusUrl` if the socket is unavailable. Both are always valid.
+The client opens an `EventSource` on `eventsUrl` for live progress and falls back
+to polling `statusUrl` if streaming is unavailable. Both are always valid.
 
 **Idempotency.** Requests that enqueue a job accept an `Idempotency-Key` header.
 Re-sending the same key while a job is in flight returns the **same** `202` body
@@ -201,30 +202,58 @@ default, so nobody deletes data by omission.
 
 ---
 
-## 2. Real-time (SignalR)
+## 2. Live streams (Server-Sent Events)
 
-Four hubs, all authenticated by the session cookie, all enforcing the same
-permissions as the equivalent REST endpoint at subscription time.
+Four streams, each an ordinary authenticated `GET` returning `text/event-stream`.
+Not WebSockets and not a hub: every stream in Airside is server-to-client, and
+the client's only input is which resource it wants — which is a URL.
 
-| Hub | Subscribe | Server events |
+| Stream | Permission | Events |
 |---|---|---|
-| `/hubs/jobs` | `Subscribe(jobId)` / `SubscribeAll()` | `JobUpdated(JobDto)`, `JobStepAppended(JobStepDto)` |
-| `/hubs/logs` | `Subscribe(workloadId, LogQuery)` | `LogLine(LogLineDto)`, `LogStreamEnded(reason)` |
-| `/hubs/metrics` | `Subscribe(workloadId)` / `SubscribeHost()` | `MetricSample(MetricSampleDto)` |
-| `/hubs/notifications` | automatic on connect | `NotificationRaised(NotificationDto)`, `NotificationResolved(id)` |
+| `GET /api/v1/jobs/{id}/events` | authenticated | `job.updated`, `job.step`, `job.completed` |
+| `GET /api/v1/databases/{id}/logs/stream?tail=200` | `logs.read` | `log.line` |
+| `GET /api/v1/databases/{id}/metrics/stream?intervalSeconds=5` | `metrics.read` | `metric.sample` |
+| `GET /api/v1/notifications/stream` | authenticated | `notification.raised` |
 
-**Late joiners get history.** Subscribing to a job replays its persisted steps
-before streaming new ones, so a client that connects after a provision started
-sees the whole log rather than joining mid-story.
+```
+id: 3
+event: job.step
+data: {"sequence":3,"name":"health","message":"Health check passed.","occurredAt":"…"}
 
-**Log streams are bounded.** Each connection has a server-side buffer cap; a
-container writing faster than the client reads gets dropped lines with an
-explicit `LogStreamEnded("backpressure")` rather than exhausting server memory.
+: keep-alive
+```
 
-**Live metrics are never persisted.** The metrics hub streams from the container
-runtime directly. Historical data is hourly rollups from `GET .../metrics` —
-you cannot retrospectively examine a two-minute spike from last week. See
-`DATA-MODEL.md` §11.
+**Resume is the point.** Every frame that can be resumed from carries an `id`.
+A browser sends the last one back as `Last-Event-ID` on reconnect automatically,
+and the server continues from there rather than replaying what the client already
+saw or — worse — skipping what arrived while it was disconnected. Job streams
+resume on the step sequence; log streams resume on the timestamp, so a reconnect
+asks Docker for lines `since` that point.
+
+Clients that cannot set headers may pass `?lastEventId=` instead, which is what
+makes `curl -N` a first-class way to watch any stream in the product.
+
+**`stream.closing`** ends a stream with a reason rather than dropping it silently:
+
+| Reason | Meaning |
+|---|---|
+| `job-complete` | The job reached a terminal state; nothing further will arrive |
+| `rate-limited` | The container out-ran the reader; reconnect with `Last-Event-ID` to continue |
+| `container-gone` | The container no longer exists |
+
+**Backpressure.** A subscriber that stops reading fills a bounded per-connection
+buffer, and further events are dropped rather than queued — one browser tab must
+not be able to grow the control plane's heap. Log streams cap at 2000 lines per
+second and then close with `rate-limited`, because reconnect-and-resume recovers
+the gap correctly whereas silently dropping lines does not.
+
+**Live metrics are never persisted.** Historical data is the hourly rollup from
+`GET .../metrics`. `metric.sample.cpuNanos` is `null` on the first sample for a
+container: Docker's one-shot stats call carries no previous CPU reading, and a
+plausible `0` would be a lie.
+
+A heartbeat comment is sent every 15 seconds. Without it, proxies close an idle
+stream and the client sees an unexplained disconnect.
 
 ---
 

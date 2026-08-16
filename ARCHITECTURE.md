@@ -90,9 +90,9 @@ together. Folders give the same navigability at zero assembly cost.
 
 ### `Airside.Api`
 
-Minimal-API endpoint groups, authentication and authorisation policies, SignalR
-hubs, the job dispatcher hosted service, the reconciliation hosted service, and
-the composition root. Produces the `airside-api` container image.
+Minimal-API endpoint groups, authentication and authorisation policies, live
+server-sent-event endpoints, the job dispatcher hosted service, the reconciliation hosted service,
+and the composition root. Produces the `airside-api` container image.
 
 ### `Airside.Cli`
 
@@ -369,9 +369,21 @@ removed, Caddy route withdrawn. Handlers are idempotent by workload ID: re-runni
 a provision finds the existing container by label and converges rather than
 creating a second one.
 
-Progress and step logs stream over SignalR. Container logs stream over SignalR
-too, from the Docker log follow API, with a bounded per-connection buffer so a
-chatty container cannot exhaust server memory.
+Progress and step logs stream as server-sent events, as do container logs from
+the Docker log follow API — with a bounded per-connection buffer so a chatty
+container cannot exhaust server memory.
+
+> **Not SignalR, though the brief specified it.** Every stream Airside has is
+> server-to-client; the client's only input is which resource it wants, which is
+> a URL. A hub buys bidirectional RPC and transport fallback that nothing here
+> uses, and costs a client library plus a set of endpoints that cannot appear in
+> the OpenAPI document. SSE also gives resumability for free: the browser returns
+> `Last-Event-ID` on reconnect, so a client that drops mid-provision continues
+> from the step it last saw. A hub reconnect restores the transport but not the
+> missed application state — that had to be hand-written, and only worked on the
+> initial connect. The one thing genuinely needing a socket is an interactive
+> `exec` terminal, and that would be one WebSocket endpoint rather than a
+> framework.
 
 **Reconciliation** runs on a timer and on demand: list everything labelled
 `airside.managed=true`, diff against the store, record drift. The MVP **reports**

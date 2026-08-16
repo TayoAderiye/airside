@@ -47,8 +47,7 @@ destructuring policy; cookie auth and permission policies; `PermissionRequiremen
 + handler; global `IExceptionHandler`; `ProblemDetails` mapping from `Error`;
 FluentValidation endpoint filter; `JobDispatcherService` (`BackgroundService` +
 `Channel<Guid>` + startup recovery sweep + per-workload lease);
-`ReconciliationService`; `JobsHub`, `LogsHub`, `MetricsHub`,
-`NotificationsHub`; endpoint groups for setup, auth, users, roles, host, system,
+`ReconciliationService`; the server-sent-event endpoints; endpoint groups for setup, auth, users, roles, host, system,
 jobs, audit; OpenAPI generation.
 
 **`deploy/`** — `install.sh`; `docker-compose.yml`; `Dockerfile` for the API;
@@ -103,7 +102,7 @@ checksum and engine-version verification; retention pruner; `SqlQueryConsole`,
 `StartsWith` denylist); credential rotation.
 
 **`Airside.Api`** — backup, restore, credential, and query endpoints; live log
-and metric streaming over the hubs.
+and metric streaming.
 
 **Tests** — backup round-trip per engine (integration); truncated backup is
 refused; version mismatch is refused before stopping anything; Redis restore

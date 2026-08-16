@@ -3,7 +3,7 @@ using Airside.Api.Contracts;
 using Airside.Api.Features;
 using Airside.Api.Features.Databases;
 using Airside.Api.Hosting;
-using Airside.Api.Hubs;
+using Airside.Api.Realtime;
 using Airside.Api.Infrastructure;
 using Airside.Api.Jobs;
 using Airside.Api.Security;
@@ -97,6 +97,9 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         // Always secure in production. On first run there is no domain and
         // therefore no publicly trusted certificate, so the installer's own
         // warning — not a relaxed cookie — is what covers that window.
+        //
+        // SameSite=Strict works for the live streams because EventSource sends
+        // cookies on same-origin requests; the dashboard and API share an origin.
         options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
             ? CookieSecurePolicy.SameAsRequest
             : CookieSecurePolicy.Always;
@@ -128,7 +131,8 @@ builder.Services.AddScoped<ClaimsFactory>();
 // ---------------------------------------------------------------------------
 builder.Services.AddSingleton<JobSignal>();
 builder.Services.AddSingleton<IJobSignal>(sp => sp.GetRequiredService<JobSignal>());
-builder.Services.AddSingleton<IJobProgressObserver, JobProgressBroadcaster>();
+builder.Services.AddSingleton<IEventBus, InProcessEventBus>();
+builder.Services.AddSingleton<IJobProgressObserver, JobEventPublisher>();
 builder.Services.AddScoped<IJobHandlerRegistry, JobHandlerRegistry>();
 builder.Services.AddHostedService<JobDispatcherService>();
 
@@ -139,7 +143,6 @@ builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
 builder.Services.AddScoped<IBackupStore, BackupStore>();
 builder.Services.AddHostedService<HostDiscoveryService>();
 
-builder.Services.AddSignalR();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddOpenApi();
@@ -211,11 +214,7 @@ app.MapSystemEndpoints();
 app.MapDatabaseEndpoints();
 app.MapBackupEndpoints();
 
-app.MapHub<JobsHub>("/hubs/jobs");
-app.MapHub<LogsHub>("/hubs/logs");
-app.MapHub<MetricsHub>("/hubs/metrics");
-app.MapHub<NotificationsHub>("/hubs/notifications");
-
+app.MapRealtimeEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

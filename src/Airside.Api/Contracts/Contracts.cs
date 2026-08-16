@@ -8,24 +8,24 @@ namespace Airside.Api.Contracts;
 /// The body every 202 returns.
 /// </summary>
 /// <remarks>
-/// Carries both a poll URL and a hub topic. A client subscribes to the topic for
-/// live progress and falls back to polling when the socket is unavailable; both
-/// are always valid, so a proxy that breaks WebSockets degrades the experience
-/// rather than the product.
+/// Carries both a poll URL and a stream URL. A client opens an EventSource on
+/// <c>eventsUrl</c> for live progress and falls back to polling
+/// <c>statusUrl</c>; both are always valid, so an intermediary that mangles
+/// streaming degrades the experience rather than the product.
 /// </remarks>
 public sealed record JobAccepted(
     Guid JobId,
     string JobType,
     Guid? WorkloadId,
     string StatusUrl,
-    string HubTopic)
+    string EventsUrl)
 {
     public static JobAccepted From(Guid jobId, string jobType, Guid? workloadId) => new(
         jobId,
         jobType,
         workloadId,
         $"/api/v1/jobs/{jobId}",
-        $"job:{jobId}");
+        $"/api/v1/jobs/{jobId}/events");
 }
 
 public sealed record JobStepDto(int Sequence, string Name, string? Message, DateTimeOffset OccurredAt);
@@ -71,6 +71,17 @@ public sealed record JobDto(
 }
 
 public sealed record LogLineDto(DateTimeOffset Timestamp, string Stream, string Text);
+
+/// <param name="CpuNanos">
+/// Null until a container has been sampled twice. Docker's one-shot stats call
+/// carries no previous CPU reading, so the first sample can only yield a
+/// meaningless 0% — the field is null rather than a plausible lie.
+/// </param>
+public sealed record MetricSampleDto(
+    DateTimeOffset SampledAt,
+    long? CpuNanos,
+    long MemoryBytes,
+    long MemoryLimitBytes);
 
 public sealed record ResourceTripleDto(long CpuNanos, long MemoryBytes, long StorageBytes)
 {

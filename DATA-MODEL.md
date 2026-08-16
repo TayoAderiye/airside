@@ -183,9 +183,12 @@ effective permissions are the union.
 `Id`, `UserId`, `CreatedAt`, `ExpiresAt`, `LastSeenAt`, `IpAddress`,
 `UserAgent`, `RevokedAt`, `RevokedReason`.
 
-**Authentication is cookie-based, not JWT.** The dashboard is same-origin, SignalR
-carries the cookie natively, and an `HttpOnly` `SameSite=Strict` cookie keeps the
-credential out of JavaScript entirely. JWTs would buy cross-origin and
+**Authentication is cookie-based, not JWT.** The dashboard is same-origin,
+`EventSource` sends cookies on same-origin requests so the live streams need no
+scheme of their own, and an `HttpOnly` `SameSite=Strict` cookie keeps the
+credential out of JavaScript entirely. (This is also why SSE was viable at all:
+`EventSource` cannot set an `Authorization` header, which is what usually rules
+it out for bearer-token APIs.) JWTs would buy cross-origin and
 machine-to-machine access, neither of which exists in the MVP — the CLI talks to
 the Docker socket, not the API.
 
@@ -487,7 +490,7 @@ failing: a resize landing during a backup would corrupt both.
 replays to a client that connects late.
 
 Verbose output — build logs, `pg_dump` stderr — does **not** go here. It streams
-over SignalR live and, where it is worth keeping, lands in `DeploymentLog`. A
+live and, where it is worth keeping, lands in `DeploymentLog`. A
 job table carrying megabytes of container output makes every job list query slow.
 
 ### `JobResource`

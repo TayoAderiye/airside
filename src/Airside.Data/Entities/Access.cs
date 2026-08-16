@@ -110,9 +110,10 @@ public class UserRole
 /// A signed-in session.
 /// </summary>
 /// <remarks>
-/// Authentication is cookie-based: the dashboard is same-origin, SignalR carries
-/// the cookie natively, and an HttpOnly SameSite=Strict cookie keeps the
-/// credential out of JavaScript entirely. This table exists because cookie auth
+/// Authentication is cookie-based: the dashboard is same-origin, EventSource
+/// sends cookies on same-origin requests so the live streams need no scheme of
+/// their own, and an HttpOnly SameSite=Strict cookie keeps the credential out of
+/// JavaScript entirely. This table exists because cookie auth
 /// alone cannot express individual revocation — "sign out my other devices", or
 /// dropping every session the moment a user is deactivated.
 /// </remarks>
