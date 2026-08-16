@@ -7,7 +7,7 @@ learning Kubernetes and without a monthly bill.
 Airside manages Docker on the host it runs on. It is not a cluster orchestrator,
 and it is not trying to become one.
 
-> **Status: 0.1.8, pre-release.** Complete through the roadmap, heavily tested,
+> **Status: 0.1.9, pre-release.** Complete through the roadmap, heavily tested,
 > and now installed and driven on a real Linux host — which found twelve bugs,
 > all fixed, five of them capable of locking an operator out of the dashboard.
 > Read [Status](#status) before putting anything real on it.
@@ -41,7 +41,7 @@ and it is not trying to become one.
 |---|---|
 | OS | Linux, x86-64 or arm64. Ubuntu 24.04 is what it is tested on. Airside manages a Linux host and refuses to run elsewhere. |
 | Memory | 2 GB. It runs in 1 GB with nothing deployed, but Postgres, the API, the dashboard and the proxy all have to fit. |
-| Disk | 20 GB. The four images plus a database volume do not fit comfortably in the 8 GB a cloud image usually defaults to. |
+| Disk | **20 GB, and this one bites.** The four images plus a database volume do not fit in the 8 GB a cloud image usually defaults to. Airside reserves headroom against the *whole* disk, so on an 8 GB root volume it ends up with under a gibibyte to allocate and refuses to create anything. See [If it goes wrong](#if-it-goes-wrong). |
 | Ports | **80 and 443 reachable from the internet.** Port 80 is not optional — the certificate challenge uses it even for a site that only ever serves HTTPS. |
 | Access | Root, or a user with `sudo`. |
 
@@ -119,6 +119,19 @@ sudo docker compose -f /opt/airside/docker-compose.yml ps
 ```bash
 sudo docker logs airside-api --tail 50
 ```
+
+**"There is not enough storage/memory on this host"?** Airside reserves a
+proportion of the machine before it will allocate anything, and it also absorbs
+disk already used by things it does not manage. On an 8 GB root volume with
+Docker images on it, that leaves well under a gibibyte — less than the smallest
+database it can create. Grow the disk rather than trying to squeeze under it. On
+EC2: **Volumes → Modify volume → 20 GiB**, then, live and without a reboot:
+
+```bash
+sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1
+```
+
+Check what it thinks it has with `df -h /` and the **Server** screen.
 
 **Locked out after setting a dashboard domain?** Clearing it restores access on
 the host's address:

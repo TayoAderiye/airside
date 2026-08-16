@@ -603,6 +603,58 @@ reads that were never dangerous.
 
 ---
 
+## Forms that could not succeed — **done**
+
+Reported three times across two releases as "still can't create db" and
+"couldn't deploy any application", and misfiled by me each time as a server
+error. It was a 409, returned correctly, to a form that could not send anything
+else.
+
+The database form clamped its defaults to the host, with the floor applied after
+the minimum:
+
+```ts
+setStorage((s) => Math.max(1, Math.min(s, available)))
+```
+
+On the operator's host that evaluates to 1 GiB when 0.84 GiB is free. The
+slider's maximum computes to `Math.max(1, Math.min(500, 0.84))` — also 1 GiB. So
+the control sat at its own minimum, which was above the ceiling, and every
+submission was refused with nothing on screen to act on.
+
+Worked through with the host's real numbers rather than assumed:
+
+| | |
+|---|---|
+| capacity | 6.25 GiB |
+| used | 3.41 GiB |
+| base reserve (20%, floored at 2 GiB) | 2.00 GiB |
+| foreign usage absorbed by `HostAllocationReader` | 3.41 GiB |
+| **available** | **0.84 GiB** |
+| form minimum | 1.00 GiB |
+
+The application form reached the same dead end by the opposite route: it fetched
+`/host` only to draw the allocation rails, and its sliders ran to 4 cores and
+8 GiB on any machine, so the defaults overshot a small host and the overshoot was
+visible only to someone who read the rail beside them.
+
+Both now clamp against real headroom, name the minimums once so a floor cannot
+outrun a ceiling again, and refuse up front naming the resource that is short and
+by how much. Refusing up front is the point: the remedy is a bigger disk, and
+that is not on this screen.
+
+Two things worth keeping:
+
+- **The admission gate was right every time.** The bug was entirely in what the
+  form could express, which is why five identical failures produced no server
+  error to find. Reading the 409 as a server fault cost two releases.
+- **The reserve is severe on small hosts by design** — it absorbs disk used by
+  things Airside does not manage, so an 8 GB root volume with Docker images on it
+  has almost nothing left to give. That is correct, and it is now stated in the
+  README's requirements table instead of being discovered.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.
