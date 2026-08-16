@@ -102,10 +102,16 @@ public sealed class UpdateOrchestrator(
             UpdatedAt = timeProvider.GetUtcNow(),
         };
 
-        await WriteStateAsync(state, ct).ConfigureAwait(false);
-
         try
         {
+            // Inside the try, and that matters. This is the first write to the
+            // state file, so it is where a read-only or full disk shows up — and
+            // outside the handler it escaped as an unhandled 500 with the update
+            // record left Pending and no notification raised. The operator would
+            // see a server error and have no way to tell whether the update had
+            // started.
+            await WriteStateAsync(state, ct).ConfigureAwait(false);
+
             // Before anything is touched, so a failure at any later step still has
             // a snapshot of the instance as it was.
             state = state with { Step = UpdateStep.BackingUp, UpdatedAt = timeProvider.GetUtcNow() };
@@ -172,14 +178,25 @@ public sealed class UpdateOrchestrator(
             record.CompletedAt = timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-            await WriteStateAsync(
-                state with
-                {
-                    Step = UpdateStep.Failed,
-                    ErrorMessage = ex.Message,
-                    UpdatedAt = timeProvider.GetUtcNow(),
-                },
-                ct).ConfigureAwait(false);
+            // Best effort: if the state file is what failed, writing it again will
+            // fail too, and the database record above is the durable account.
+            try
+            {
+                await WriteStateAsync(
+                    state with
+                    {
+                        Step = UpdateStep.Failed,
+                        ErrorMessage = ex.Message,
+                        UpdatedAt = timeProvider.GetUtcNow(),
+                    },
+                    ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031
+            catch (Exception writeFailure)
+#pragma warning restore CA1031
+            {
+                logger.LogError(writeFailure, "Could not record the failed update in {Path}", options.StatePath);
+            }
 
             await NotifyAsync(n => n.RaiseAsync(
                 new NotificationRequest(

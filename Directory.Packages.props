@@ -51,6 +51,16 @@
       permitted to issue for a name in the first place.
     -->
     <PackageVersion Include="DnsClient" Version="1.8.0" />
+
+    <!--
+      SMTP for notification email. System.Net.Mail.SmtpClient is documented by
+      Microsoft as unsuitable for new development — it predates modern TLS
+      negotiation and has no support for OAuth or for STARTTLS on the ports
+      providers actually use. MailKit is the alternative Microsoft's own
+      documentation points at, and email delivery is not somewhere to hand-roll a
+      protocol client.
+    -->
+    <PackageVersion Include="MailKit" Version="4.17.0" />
   </ItemGroup>
 
   <ItemGroup Label="Api">

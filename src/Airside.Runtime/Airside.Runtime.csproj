@@ -11,6 +11,7 @@
     <PackageReference Include="Docker.DotNet" />
     <PackageReference Include="LibGit2Sharp" />
     <PackageReference Include="DnsClient" />
+    <PackageReference Include="MailKit" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

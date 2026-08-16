@@ -9,6 +9,9 @@ using Airside.Core.Naming;
 using Airside.Core.Operations;
 using Airside.Api.Features.Operations;
 using Airside.Api.Features.Registries;
+using Airside.Runtime.Notifications;
+using Airside.Core.Notifications;
+using Airside.Api.Features.Notifications;
 using Airside.Runtime.Domains;
 using Airside.Runtime.Dns;
 using Airside.Core.Domains;
@@ -198,6 +201,25 @@ builder.Services.AddSingleton<UpdateOrchestrator>();
 builder.Services.AddHostedService<MetricSampler>();
 builder.Services.AddScoped<RegistryCredentialStore>();
 builder.Services.AddScoped<IRegistryCredentialSource>(sp => sp.GetRequiredService<RegistryCredentialStore>());
+
+// Notification dispatch. The webhook client is built on the guarded handler, so
+// every outbound request is checked against the resolved address at connect time
+// — see OutboundGuard for why validating the URL at save time is not a check.
+builder.Services.AddSingleton(sp =>
+{
+    var dispatch = new DispatchOptions();
+    builder.Configuration.GetSection(DispatchOptions.Section).Bind(dispatch);
+    return dispatch;
+});
+builder.Services.AddHttpClient<WebhookTransport>(client => client.Timeout = TimeSpan.FromSeconds(15))
+    .ConfigurePrimaryHttpMessageHandler(sp => GuardedHttp.CreateHandler(
+        sp.GetRequiredService<DispatchOptions>().AllowPrivateDestinations,
+        sp.GetRequiredService<ILogger<WebhookTransport>>()));
+builder.Services.AddSingleton<INotificationTransport>(sp => sp.GetRequiredService<WebhookTransport>());
+builder.Services.AddSingleton<INotificationTransport>(sp =>
+    new SlackTransport(sp.GetRequiredService<WebhookTransport>()));
+builder.Services.AddSingleton<INotificationTransport, EmailTransport>();
+builder.Services.AddHostedService<NotificationDispatcher>();
 builder.Services.Configure<CaddyOptions>(builder.Configuration.GetSection(CaddyOptions.Section));
 builder.Services.AddHostedService<ProxyReconciliationService>();
 builder.Services.AddHostedService<HostDiscoveryService>();
@@ -286,6 +308,7 @@ app.MapDomainMoveEndpoints();
 app.MapOperationsEndpoints();
 app.MapMfaEndpoints();
 app.MapRegistryEndpoints();
+app.MapNotificationChannelEndpoints();
 app.MapDashboardDomainEndpoints();
 
 app.MapRealtimeEndpoints();
