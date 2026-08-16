@@ -134,7 +134,7 @@ supports them, rather than shipping two more pages of invented data.
 ## Audit: what the API offers and the dashboard never asks for
 
 Phases 1 to 5 replaced every mocked screen. That is not the same as covering the
-API. Of 79 endpoints, **31 are never called**, and some of them are features the
+API. Of 79 endpoints, **25 are never called**, and some of them are features the
 README advertises on its front page.
 
 Ordered by how badly the absence hurts.
@@ -144,24 +144,16 @@ Ordered by how badly the absence hurts.
 > calls, which missed paths passed as variables — database start, stop and
 > restart are wired that way and were wrongly listed as absent.
 
-### A database you create cannot be used
+### Done since this audit
 
-Nothing calls `/api/v1/databases/{id}/credentials`. Provision Postgres and there
-is no way to obtain the password, the username or a connection string — the
-detail screen fetches the database and offers to delete it, and that is all. The
-database works; it is simply unreachable by anything you would want to connect
-to it.
+**Database credentials** are on the detail screen — listed, revealed through the
+audited endpoint, rotated and revoked, with the connection string built against
+the container name because that is the address that resolves.
 
-Rotation, reveal and revoke (`/credentials/rotate`, `/{credentialId}/reveal`,
-`/{credentialId}/revoke`) are unreachable with it. "Credential rotation" is
-listed on the README's feature list.
-
-### An application cannot be attached to a database
-
-`POST /api/v1/applications/{id}/databases` is never called, nor the detach
-alongside it. Pairwise network isolation — the thing the README calls the most
-important test in the suite — is configured through that one endpoint, so
-through the dashboard an application can never reach a database at all.
+**Attaching a database to an application** is a tab on the application. It is the
+call that joins the two containers on a shared network and injects the connection
+as environment variables, so until it is made the application has no route to the
+database at all.
 
 ### The second factor cannot be turned on
 

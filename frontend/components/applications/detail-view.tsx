@@ -2,12 +2,25 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { RotateCcw, Square, Play, Trash2, ArrowUpRight, GitCommitHorizontal, Loader2, Eye } from 'lucide-react'
+import Link from 'next/link'
+import {
+  RotateCcw,
+  Square,
+  Play,
+  Trash2,
+  ArrowUpRight,
+  GitCommitHorizontal,
+  Loader2,
+  Eye,
+  Database as DatabaseIcon,
+  Unlink,
+} from 'lucide-react'
 
 import { PageHeader, Panel, StatItem } from '@/components/ui/panel'
 import { StatusBadge } from '@/components/status-badge'
 import { AppSourceGlyph } from '@/components/app-source'
 import { Tabs } from '@/components/ui/tabs'
+import { NativeSelect } from '@/components/ui/field'
 import { CopyField } from '@/components/ui/copy-field'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { ProblemBanner } from '@/components/problem-banner'
@@ -22,6 +35,8 @@ type App = components['schemas']['ApplicationSummaryDto']
 type Deployment = components['schemas']['DeploymentDto']
 type EnvEntry = components['schemas']['EnvironmentEntryDto']
 type Domain = components['schemas']['DomainDto']
+type Attachment = components['schemas']['AttachmentDto']
+type Database = components['schemas']['DatabaseSummaryDto']
 
 type Danger = 'stop' | 'delete' | 'rollback' | null
 
@@ -32,6 +47,10 @@ export function AppDetailView({ applicationId }: { applicationId: string }) {
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [env, setEnv] = useState<EnvEntry[]>([])
   const [domains, setDomains] = useState<Domain[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [databases, setDatabases] = useState<Database[]>([])
+  const [attachTarget, setAttachTarget] = useState('')
+  const [detachTarget, setDetachTarget] = useState<Attachment | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
 
@@ -41,17 +60,25 @@ export function AppDetailView({ applicationId }: { applicationId: string }) {
 
   const load = useCallback(async () => {
     try {
-      const [appRes, deployRes, envRes, domainRes] = await Promise.all([
+      const [appRes, deployRes, envRes, domainRes, attachRes, dbRes] = await Promise.all([
         client.GET('/api/v1/applications/{id}', { params: { path: { id: applicationId } } }),
         client.GET('/api/v1/applications/{id}/deployments', { params: { path: { id: applicationId } } }),
         client.GET('/api/v1/applications/{id}/environment', { params: { path: { id: applicationId } } }),
         client.GET('/api/v1/applications/{id}/domains', { params: { path: { id: applicationId } } }),
+        client.GET('/api/v1/applications/{id}/databases', { params: { path: { id: applicationId } } }),
+        client.GET('/api/v1/databases'),
       ])
 
       setApp(appRes.data ?? null)
       setDeployments(deployRes.data?.items ?? [])
       setEnv(envRes.data ?? [])
       setDomains(domainRes.data ?? [])
+      setAttachments(attachRes.data ?? [])
+
+      // Airside's own store is never attachable: its id is synthesised, and an
+      // application reaching the control plane's database is not something to
+      // offer as a menu option.
+      setDatabases((dbRes.data?.items ?? []).filter((d) => !d.isSystem))
       setError(null)
     } catch (err) {
       setError(err)
@@ -123,6 +150,48 @@ export function AppDetailView({ applicationId }: { applicationId: string }) {
     }
   }
 
+  /**
+   * Attaching is what puts the two containers on a shared network.
+   *
+   * It is not a label: until this call, the application has no route to the
+   * database at all, and the connection details are injected as environment
+   * variables rather than copied by hand. Isolation is pairwise, so an
+   * application reaches exactly the databases listed here and nothing else.
+   */
+  async function attach() {
+    if (!attachTarget) return
+    setBusy(true)
+    setError(null)
+    try {
+      await client.POST('/api/v1/applications/{id}/databases', {
+        params: { path: { id: applicationId } },
+        body: { databaseId: attachTarget, envKeyPrefix: null },
+      })
+      setAttachTarget('')
+      await load()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function detach(attachment: Attachment) {
+    setBusy(true)
+    setError(null)
+    try {
+      await client.DELETE('/api/v1/applications/{id}/databases/{attachmentId}', {
+        params: { path: { id: applicationId, attachmentId: attachment.id } },
+      })
+      setDetachTarget(null)
+      await load()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Audited on the server; the value replaces the mask in place. */
   async function reveal(key: string) {
     try {
@@ -164,9 +233,12 @@ export function AppDetailView({ applicationId }: { applicationId: string }) {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'deployments', label: 'Deployments', badge: deployments.length },
+    { id: 'databases', label: 'Databases', badge: attachments.length },
     { id: 'env', label: 'Environment', badge: env.length },
     { id: 'danger', label: 'Danger zone' },
   ]
+
+  const attachable = databases.filter((d) => !attachments.some((a) => a.databaseId === d.id))
 
   return (
     <div className="flex flex-col gap-5">
@@ -288,6 +360,87 @@ export function AppDetailView({ applicationId }: { applicationId: string }) {
         </Panel>
       )}
 
+      {tab === 'databases' && (
+        <Panel
+          title="Attached databases"
+          description="Attaching joins the two containers on a shared network and injects the connection as environment variables. Until then this application has no route to the database at all."
+        >
+          {attachments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing attached. This application cannot reach any database.
+            </p>
+          ) : (
+            <ul className="mb-4 divide-y divide-border rounded-md border border-border">
+              {attachments.map((a) => (
+                <li key={a.id} className="flex flex-col gap-2 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <DatabaseIcon className="size-3.5 shrink-0 text-running" />
+                    <Link href={`/databases/${a.databaseId}`} className="font-mono text-xs text-foreground hover:text-accent">
+                      {a.databaseSlug}
+                    </Link>
+                    <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                      {a.engine}
+                    </span>
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      attached {formatRelative(a.attachedAt)}
+                    </span>
+                    <span className="flex-1" />
+                    <button
+                      type="button"
+                      onClick={() => setDetachTarget(a)}
+                      className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground hover:text-failed"
+                    >
+                      <Unlink className="size-3.5" /> Detach
+                    </button>
+                  </div>
+
+                  {a.injectedKeys.length > 0 && (
+                    <p className="flex flex-wrap gap-1.5">
+                      {/* The point of attaching: the application reads these
+                          rather than carrying a connection string someone
+                          pasted, so a rotation reaches it without an edit. */}
+                      {a.injectedKeys.map((k) => (
+                        <span
+                          key={k}
+                          className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        >
+                          {k}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {attachable.length > 0 ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="min-w-48 flex-1">
+                <span className="mb-1 block text-xs text-muted-foreground">Attach a database</span>
+                <NativeSelect value={attachTarget} onChange={(e) => setAttachTarget(e.target.value)}>
+                  <option value="">Choose…</option>
+                  {attachable.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.displayName || d.slug} · {d.engine} {d.version}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <Button variant="outline" size="sm" disabled={!attachTarget || busy} onClick={attach}>
+                {busy ? 'Attaching…' : 'Attach'}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {databases.length === 0
+                ? 'No databases on this host yet.'
+                : 'Every database on this host is already attached.'}
+            </p>
+          )}
+        </Panel>
+      )}
+
       {tab === 'env' && (
         <Panel
           title="Environment variables"
@@ -388,6 +541,28 @@ export function AppDetailView({ applicationId }: { applicationId: string }) {
         confirmLabel={`Roll back to #${rollbackTarget?.number ?? ''}`}
         requireTyped={rollbackTarget ? String(rollbackTarget.number) : undefined}
         onConfirm={rollback}
+      />
+
+      <ConfirmDialog
+        open={detachTarget !== null}
+        onOpenChange={(o) => !o && setDetachTarget(null)}
+        tone="warn"
+        title={`Detach ${detachTarget?.databaseSlug ?? ''}?`}
+        description={
+          detachTarget ? (
+            <div className="flex flex-col gap-2">
+              <p>
+                The two containers leave their shared network and the injected variables stop being set. This
+                application loses its route to{' '}
+                <span className="font-mono text-foreground">{detachTarget.databaseSlug}</span> immediately — anything
+                mid-query fails.
+              </p>
+              <p className="text-muted-foreground">The database itself is untouched, and nothing in it is deleted.</p>
+            </div>
+          ) : null
+        }
+        confirmLabel={busy ? 'Detaching…' : 'Detach'}
+        onConfirm={() => detachTarget && detach(detachTarget)}
       />
 
       <ConfirmDialog
