@@ -1,0 +1,24 @@
+# Without this, `COPY src/ src/` drops the host's bin/ and obj/ directories on top
+# of the restore the image just performed — and the assets file it overwrites
+# references the host's NuGet paths and SDK band. The build then fails with
+# NETSDK1064 "package not found" immediately after a restore that succeeded,
+# which points nowhere near the real cause.
+**/bin/
+**/obj/
+
+# Not part of the image, and the context is transferred to the daemon in full.
+.git/
+.github/
+tests/
+docs/
+deploy/
+*.md
+NOTICE
+LICENSE
+
+# Editor and OS state.
+.idea/
+.vs/
+.vscode/
+*.user
+.DS_Store

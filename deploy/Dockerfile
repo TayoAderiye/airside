@@ -5,7 +5,11 @@ WORKDIR /src
 
 # Restore first, against the manifests only, so a source-only change does not
 # invalidate the restore layer.
-COPY Directory.Build.props Directory.Packages.props NuGet.config global.json ./
+# .editorconfig belongs here with the build props: it carries the analyser
+# suppressions, and TreatWarningsAsErrors is on. Without it the image build fails
+# on CA1716 and CA1711 for names the repository has deliberately kept — rules that
+# pass everywhere else, which makes the image look like the broken thing.
+COPY Directory.Build.props Directory.Packages.props NuGet.config global.json .editorconfig ./
 COPY src/Airside.Core/Airside.Core.csproj                                   src/Airside.Core/
 COPY src/Airside.Data/Airside.Data.csproj                                   src/Airside.Data/
 COPY src/Airside.Data.Migrations.Postgres/Airside.Data.Migrations.Postgres.csproj src/Airside.Data.Migrations.Postgres/
@@ -20,13 +24,18 @@ RUN dotnet publish src/Airside.Api/Airside.Api.csproj -c Release -o /app --no-re
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# The image declares a non-root user, but the Docker socket is root-owned on most
-# hosts. The compose file adds the host's docker group id instead of running as
-# root — see docker-compose.yml, and SECURITY.md for what socket access means.
-RUN adduser --system --uid 10001 --group airside
-COPY --from=build /app .
-RUN chown -R airside:airside /app
-USER airside
+# The base image already ships a non-root "app" user at uid 1654, and since .NET 8
+# that is the intended way to drop privileges here. Creating one is not an option
+# anyway: this base is Ubuntu chiselled and carries neither adduser nor useradd,
+# so `RUN adduser` fails with exit 127 — which reads as a broken Dockerfile rather
+# than a missing package.
+#
+# Running non-root does not contain the Docker socket, which is root-equivalent
+# whoever holds it. The compose file adds the host's docker group instead of
+# running as root, which narrows everything else the process can touch. See
+# SECURITY.md for what socket access means.
+COPY --from=build --chown=app:app /app .
+USER app
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080

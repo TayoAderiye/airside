@@ -19,6 +19,10 @@
       contributor on 10.0.100 could not reproduce it, because the rule did not
       exist there.
 
+      Pinning this is the whole fix; global.json deliberately still rolls forward
+      by feature band, because the SDK container image and a contributor's machine
+      will not be on the same one and requiring that broke the Docker build.
+
       This is the same reason Airside refuses a floating image tag: a version that
       moves on its own turns a routine build into an unplanned upgrade. Raising
       this number is a deliberate act, and whatever new rules appear get fixed
