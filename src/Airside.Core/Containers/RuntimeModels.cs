@@ -13,7 +13,17 @@ public sealed record ContainerSummary(
     int? ExitCode,
     ContainerHealth Health,
     IReadOnlyDictionary<string, string> Labels,
-    IReadOnlyList<string> Networks);
+    IReadOnlyList<string> Networks,
+    IReadOnlyList<PublishedPort> Ports);
+
+/// <summary>A host port a container has claimed.</summary>
+/// <remarks>
+/// Carried so pre-flight can name what is holding port 80. The API runs in its
+/// own network namespace, so it cannot see the host's listening sockets — asking
+/// Docker for its port bindings is the only view available from in here, and it
+/// covers the common case of a leftover container from a previous stack.
+/// </remarks>
+public sealed record PublishedPort(int HostPort, int ContainerPort, string BindAddress);
 
 public enum ContainerRunState
 {

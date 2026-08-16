@@ -10,7 +10,21 @@
   <ItemGroup>
     <PackageReference Include="Docker.DotNet" />
     <PackageReference Include="LibGit2Sharp" />
+    <PackageReference Include="DnsClient" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!--
+    The Public Suffix List, embedded rather than fetched. Rate-limit accounting
+    needs to know that the registered domain of shop.example.co.uk is
+    example.co.uk and not co.uk, and downloading that at runtime would make a
+    routine check depend on the network and on publicsuffix.org staying up.
+    Comments and blank lines are stripped; the upstream VERSION line is kept.
+    MPL-2.0 — see NOTICE.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Dns\data\public_suffix_list.dat" />
+    <EmbeddedResource Include="Dns\data\cloudflare_ranges.txt" />
   </ItemGroup>
 
   <ItemGroup>

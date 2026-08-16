@@ -1,3 +1,4 @@
+using Airside.Core.Domains;
 using Airside.Data.Entities;
 
 namespace Airside.Api.Contracts;
@@ -206,7 +207,7 @@ public sealed record DomainDto(
 
         var warnings = new List<WarningDto>();
 
-        if (d.State == DomainState.Pending)
+        if (d.Status == DomainStatus.Pending)
         {
             warnings.Add(new WarningDto(
                 "domain.awaiting_certificate",
@@ -230,7 +231,7 @@ public sealed record DomainDto(
             d.ApplicationId,
             d.Hostname,
             d.IsPrimary,
-            d.State.ToString().ToLowerInvariant(),
+            d.Status.ToString().ToLowerInvariant(),
             d.CertificateIssuer,
             d.CertificateNotAfter is null ? null : new DateTimeOffset(d.CertificateNotAfter.Value, TimeSpan.Zero),
             expiresIn,

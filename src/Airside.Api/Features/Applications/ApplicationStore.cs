@@ -1,3 +1,4 @@
+using Airside.Core.Domains;
 using System.Text.Json;
 using Airside.Core.Common;
 using Airside.Core.Containers;
@@ -103,7 +104,7 @@ internal sealed class ApplicationStore(
             [.. attachments.Select(a => a.NetworkName)],
             await db.Domains
                 .AsNoTracking()
-                .Where(d => d.ApplicationId == applicationId && d.State != DomainState.Failed)
+                .Where(d => d.ApplicationId == applicationId && d.Status != DomainStatus.Failed)
                 .Select(d => d.Hostname)
                 .ToListAsync(ct)
                 .ConfigureAwait(false));

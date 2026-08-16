@@ -1,3 +1,4 @@
+using Airside.Core.Domains;
 using System.Security.Claims;
 using Airside.Api.Contracts;
 using Airside.Api.Infrastructure;
@@ -104,7 +105,7 @@ internal static class DomainEndpoints
             ApplicationId = id,
             Hostname = hostname!,
             IsPrimary = !await db.Domains.AnyAsync(d => d.ApplicationId == id, ct).ConfigureAwait(false),
-            State = DomainState.Pending,
+            Status = DomainStatus.Pending,
         };
 
         db.Domains.Add(domain);

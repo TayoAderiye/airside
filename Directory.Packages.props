@@ -42,6 +42,15 @@
       shell anywhere in it.
     -->
     <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />
+
+    <!--
+      DNS lookups against a chosen resolver. The framework's Dns class cannot do
+      either thing pre-flight needs: it always uses the host's own resolver — the
+      one machine most likely to answer differently from the public internet — and
+      it cannot read CAA records at all, which decide whether Let's Encrypt is
+      permitted to issue for a name in the first place.
+    -->
+    <PackageVersion Include="DnsClient" Version="1.8.0" />
   </ItemGroup>
 
   <ItemGroup Label="Api">

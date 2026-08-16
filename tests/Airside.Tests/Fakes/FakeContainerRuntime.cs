@@ -63,7 +63,8 @@ internal sealed class FakeContainerOperations(FakeContainerRuntime parent) : ICo
         parent.ContainerStore[id] = new ContainerSummary(
             id, spec.Name, spec.Image.ToString(), "sha256:test",
             ContainerRunState.Created, DateTimeOffset.UnixEpoch, null, null,
-            ContainerHealth.Starting, spec.Labels, spec.NetworkName is null ? [] : [spec.NetworkName]);
+            ContainerHealth.Starting, spec.Labels, spec.NetworkName is null ? [] : [spec.NetworkName],
+            [.. spec.Ports.Select(p => new PublishedPort(p.HostPort, p.ContainerPort, p.BindAddress))]);
 
         return Task.FromResult(id);
     }

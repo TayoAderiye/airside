@@ -1,3 +1,4 @@
+using Airside.Core.Domains;
 using Airside.Core.Naming;
 using Airside.Data;
 using Airside.Data.Entities;
@@ -71,7 +72,7 @@ internal sealed class DomainStore(AirsideDbContext db, TimeProvider timeProvider
         // once DNS points here and Caddy completes the ACME challenge — claiming
         // Active before that would tell the operator the domain is finished when
         // it may never issue.
-        domain.State = DomainState.Pending;
+        domain.Status = DomainStatus.Pending;
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
@@ -85,7 +86,7 @@ internal sealed class DomainStore(AirsideDbContext db, TimeProvider timeProvider
             return;
         }
 
-        domain.State = DomainState.Failed;
+        domain.Status = DomainStatus.Failed;
         domain.ErrorCode = code;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
@@ -116,7 +117,7 @@ internal sealed class DomainStore(AirsideDbContext db, TimeProvider timeProvider
         domain.CertificateNotBefore = certificate.NotBefore.UtcDateTime;
         domain.CertificateNotAfter = certificate.NotAfter.UtcDateTime;
         domain.CertificateAutoRenew = certificate.AutoRenew;
-        domain.State = DomainState.Active;
+        domain.Status = DomainStatus.Active;
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }

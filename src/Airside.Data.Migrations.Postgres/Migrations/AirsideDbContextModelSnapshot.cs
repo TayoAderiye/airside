@@ -487,6 +487,13 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.Property<bool>("CertificateAutoRenew")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("CertificateFingerprint")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<bool>("CertificateIsStaging")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("CertificateIssuer")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -497,26 +504,74 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.Property<DateTime?>("CertificateNotBefore")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("CertificateSans")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("CertificateSecretId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CertificateSubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("DetachedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayHostname")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
 
                     b.Property<string>("Hostname")
                         .IsRequired()
                         .HasMaxLength(253)
                         .HasColumnType("character varying(253)");
 
+                    b.Property<bool>("HstsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("HstsIncludeSubdomains")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("HstsMaxAgeSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("HstsPreload")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsPrimary")
                         .HasColumnType("boolean");
 
                     b.Property<DateTime?>("LastCertificateCheckAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastValidationAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastValidationJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("RedirectToDomainId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RegisteredDomain")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
 
                     b.Property<string>("RouteId")
                         .HasMaxLength(128)
@@ -525,7 +580,12 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.Property<Guid>("RowVersion")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("State")
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("TlsMode")
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
@@ -537,8 +597,14 @@ namespace Airside.Data.Migrations.Postgres.Migrations
 
                     b.HasIndex("ApplicationId");
 
+                    b.HasIndex("CertificateNotAfter");
+
                     b.HasIndex("Hostname")
                         .IsUnique();
+
+                    b.HasIndex("RedirectToDomainId");
+
+                    b.HasIndex("RegisteredDomain");
 
                     b.ToTable("domains", (string)null);
                 });
@@ -714,6 +780,56 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("instance_settings", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.IssuanceAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AttemptedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Hostname")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
+                    b.Property<string>("RegisteredDomain")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)");
+
+                    b.Property<DateTime?>("RetryAfter")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Staging")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Succeeded")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Hostname", "AttemptedAt");
+
+                    b.HasIndex("RegisteredDomain", "AttemptedAt");
+
+                    b.ToTable("issuance_attempts", (string)null);
                 });
 
             modelBuilder.Entity("Airside.Data.Entities.Job", b =>
@@ -1664,6 +1780,11 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                         .HasForeignKey("ApplicationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Airside.Data.Entities.Domain", null)
+                        .WithMany()
+                        .HasForeignKey("RedirectToDomainId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Application");
                 });

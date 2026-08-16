@@ -143,7 +143,8 @@ internal static class DockerMapping
             ExitCode: inspect.State is null ? null : (int)inspect.State.ExitCode,
             Health: ToHealth(inspect.State?.Health),
             Labels: labels,
-            Networks: inspect.NetworkSettings?.Networks?.Keys.ToList() ?? []);
+            Networks: inspect.NetworkSettings?.Networks?.Keys.ToList() ?? [],
+            Ports: ToPublishedPorts(inspect.NetworkSettings?.Ports));
     }
 
     public static ContainerSummary ToSummary(DM.ContainerListResponse listed) => new(
@@ -159,7 +160,47 @@ internal static class DockerMapping
         Labels: listed.Labels is null
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(listed.Labels, StringComparer.Ordinal),
-        Networks: listed.NetworkSettings?.Networks?.Keys.ToList() ?? []);
+        Networks: listed.NetworkSettings?.Networks?.Keys.ToList() ?? [],
+        Ports: listed.Ports?
+            .Where(p => p.PublicPort != 0)
+            .Select(p => new PublishedPort((int)p.PublicPort, (int)p.PrivatePort, p.IP ?? string.Empty))
+            .ToList() ?? []);
+
+    /// <summary>Flattens Docker's port map, which nests bindings under "80/tcp".</summary>
+    private static List<PublishedPort> ToPublishedPorts(
+        IDictionary<string, IList<DM.PortBinding>>? ports)
+    {
+        if (ports is null)
+        {
+            return [];
+        }
+
+        var result = new List<PublishedPort>();
+
+        foreach (var (key, bindings) in ports)
+        {
+            if (bindings is null)
+            {
+                continue;
+            }
+
+            var containerPort = int.TryParse(
+                key.Split('/')[0], System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : 0;
+
+            foreach (var binding in bindings)
+            {
+                if (int.TryParse(
+                    binding.HostPort, System.Globalization.CultureInfo.InvariantCulture, out var hostPort))
+                {
+                    result.Add(new PublishedPort(hostPort, containerPort, binding.HostIP ?? string.Empty));
+                }
+            }
+        }
+
+        return result;
+    }
 
     public static VolumeSummary ToSummary(DM.VolumeResponse volume) => new(
         Name: volume.Name,
