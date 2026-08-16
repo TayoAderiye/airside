@@ -126,12 +126,19 @@ public sealed record LogQuery
 /// previous CPU reading, so the first sample can only yield a meaningless 0% —
 /// this returns null rather than a plausible lie.
 /// </param>
+/// <param name="NetworkRxBytes">
+/// Cumulative since the container started, not a delta. Summed across every
+/// interface, because an application on three networks reports three counters and
+/// a chart of one of them is nobody's question.
+/// </param>
 public sealed record ContainerStatsSample(
     string ContainerId,
     DateTimeOffset SampledAt,
     long? CpuNanos,
     long MemoryBytes,
-    long MemoryLimitBytes);
+    long MemoryLimitBytes,
+    long NetworkRxBytes = 0,
+    long NetworkTxBytes = 0);
 
 public sealed record ImageBuildRequest(
     string ContextPath,

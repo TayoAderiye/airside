@@ -69,6 +69,14 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
 
     public DbSet<DomainCertificate> DomainCertificates => Set<DomainCertificate>();
 
+    public DbSet<MetricRollup> MetricRollups => Set<MetricRollup>();
+
+    public DbSet<Notification> Notifications => Set<Notification>();
+
+    public DbSet<UpdateRecord> UpdateRecords => Set<UpdateRecord>();
+
+    public DbSet<UserMfa> UserMfa => Set<UserMfa>();
+
     public DbSet<Backup> Backups => Set<Backup>();
 
     public DbSet<Restore> Restores => Set<Restore>();

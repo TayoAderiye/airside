@@ -367,7 +367,9 @@ internal sealed class DockerContainerOperations(DD.IDockerClient client, ILogger
             SampledAt: now,
             CpuNanos: cpuNanos,
             MemoryBytes: (long)(captured.MemoryStats?.Usage ?? 0),
-            MemoryLimitBytes: (long)(captured.MemoryStats?.Limit ?? 0));
+            MemoryLimitBytes: (long)(captured.MemoryStats?.Limit ?? 0),
+            NetworkRxBytes: (long)(captured.Networks?.Values.Sum(n => (decimal)n.RxBytes) ?? 0),
+            NetworkTxBytes: (long)(captured.Networks?.Values.Sum(n => (decimal)n.TxBytes) ?? 0));
     }
 
     public async Task<ExecResult> ExecAsync(ExecRequest request, Stream? standardOutput, CancellationToken ct)

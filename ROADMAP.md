@@ -232,7 +232,7 @@ dashboard domain guarded by DNS verification before the switch plus
 
 ---
 
-## Phase 6 — Operations
+## Phase 6 — Operations — **done**
 
 **`Airside.Data`** — `MetricRollup`, `Notification`, `UpdateRecord`; migration
 `0006_Operations` ×2.
@@ -251,6 +251,39 @@ enrolment.
 **Tests** — update rollback on a failed health check; `state.json` lets the CLI
 finish an update whose updater died; dedupe suppresses repeat expiry
 notifications.
+
+All three are in place, plus TOTP against RFC 6238's published vectors — a TOTP
+implementation that is subtly wrong still produces six plausible digits, and the
+only symptom is users unable to log in with a code their phone says is correct.
+
+### Verified by running it
+
+- **Metrics** against a live Redis container: two samples folded into one hourly
+  row, average exactly between them, max the higher of the two. Stored as
+  nanoseconds of CPU per second rather than a percentage, so a chart compares
+  usage against the workload's own limit rather than against the host.
+- **System backup** through the API: the archive contains the store dump, the
+  manifest, and the real Data Protection key ring. A backup missing the key ring
+  is reported as usable-but-undecryptable rather than silently restored.
+- **MFA** end to end, confirming with a code computed independently in Python
+  from the returned secret — a cross-implementation check rather than the
+  implementation agreeing with itself.
+- **The CLI** published NativeAOT and run on Linux against a real
+  `state.json` left at `Swapping`: it produces the recovery steps, the migration
+  caveat, and a rollback pinned to the previous **digest** rather than the tag.
+
+### Deliberate limits
+
+- `airside update` and `airside rollback` print the exact commands rather than
+  performing the swap. Doing it properly needs the compose file, its environment,
+  and the socket, and a CLI reimplementing all three would drift out of step with
+  the compose file the installer wrote — silently, and only noticeably during an
+  update. The API drives updates; the CLI exists for when the API cannot.
+- The swap itself is prepared by the API and carried out by Docker Compose. The
+  API cannot stop its own container mid-request and survive to report the result,
+  so the outcome is reconciled from `state.json` at the next startup.
+- Notifications are raised and deduplicated but not delivered anywhere outside
+  the API. Email and webhook dispatch are not built.
 
 ---
 

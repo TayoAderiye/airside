@@ -3,6 +3,11 @@ using Airside.Api.Contracts;
 using Airside.Api.Features;
 using Airside.Api.Features.Applications;
 using Airside.Api.Features.Domains;
+using Microsoft.Extensions.Options;
+using Airside.Runtime.Operations;
+using Airside.Core.Naming;
+using Airside.Core.Operations;
+using Airside.Api.Features.Operations;
 using Airside.Runtime.Domains;
 using Airside.Runtime.Dns;
 using Airside.Core.Domains;
@@ -163,6 +168,33 @@ builder.Services.AddHostedService<CertificateExpiryService>();
 builder.Services.AddAirsideForwardedHeaders(builder.Configuration);
 builder.Services.AddHostedService<CertificateStoreCheck>();
 builder.Services.AddHostedService<DomainResetCheck>();
+
+// Operations. The update options are resolved as a concrete instance rather than
+// IOptions because the CLI-facing paths in them are also read at startup, before
+// the options pipeline would normally be consulted.
+builder.Services.AddSingleton(sp =>
+{
+    var options = new UpdateOptions();
+    builder.Configuration.GetSection(UpdateOptions.Section).Bind(options);
+    return options;
+});
+builder.Services.AddScoped<INotifier, Notifier>();
+builder.Services.AddSingleton<ITotp, Totp>();
+builder.Services.AddSingleton(sp =>
+{
+    var store = sp.GetRequiredService<IOptions<AirsideStoreOptions>>().Value;
+
+    return new SystemBackupContext(
+        store.Provider.ToString(),
+        store.ConnectionString,
+        store.KeyRingPath,
+        AirsideLabels.SystemContainers.Database,
+        "airside",
+        "airside");
+});
+builder.Services.AddSingleton<ISystemBackupProvider, SystemBackupProvider>();
+builder.Services.AddSingleton<UpdateOrchestrator>();
+builder.Services.AddHostedService<MetricSampler>();
 builder.Services.Configure<CaddyOptions>(builder.Configuration.GetSection(CaddyOptions.Section));
 builder.Services.AddHostedService<ProxyReconciliationService>();
 builder.Services.AddHostedService<HostDiscoveryService>();
@@ -248,6 +280,8 @@ app.MapApplicationEndpoints();
 app.MapApplicationLifecycleEndpoints();
 app.MapDomainEndpoints();
 app.MapDomainMoveEndpoints();
+app.MapOperationsEndpoints();
+app.MapMfaEndpoints();
 app.MapDashboardDomainEndpoints();
 
 app.MapRealtimeEndpoints();

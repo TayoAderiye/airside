@@ -1065,6 +1065,137 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                     b.ToTable("job_steps", (string)null);
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.MetricRollup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CpuLimitNanos")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CpuNanosAvg")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CpuNanosMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("HourUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("MemoryBytesAvg")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MemoryBytesMax")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("MemoryLimitBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NetworkRxBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NetworkTxBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SampleCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WorkloadId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HourUtc");
+
+                    b.HasIndex("WorkloadId", "HourUtc")
+                        .IsUnique();
+
+                    b.ToTable("metric_rollups", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.Notification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AcknowledgedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AcknowledgedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OccurrenceCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResourceKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastSeenAt");
+
+                    b.HasIndex("DedupeKey", "ResolvedAt");
+
+                    b.ToTable("notifications", (string)null);
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.Permission", b =>
                 {
                     b.Property<string>("Code")
@@ -1331,6 +1462,115 @@ namespace Airside.Data.Migrations.Sqlite.Migrations
                         .IsUnique();
 
                     b.ToTable("source_credentials", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.UpdateRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("AppliedMigrations")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FromImageDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FromVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PreUpdateBackupPath")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("StartedByUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToImageDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StartedAt");
+
+                    b.ToTable("update_records", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.UserMfa", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EncryptedSecret")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LastUsedTimeStep")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecoveryCodeHashes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("user_mfa", (string)null);
                 });
 
             modelBuilder.Entity("Airside.Data.Entities.UserRole", b =>
