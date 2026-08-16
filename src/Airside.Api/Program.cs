@@ -122,6 +122,18 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(storeOptions.KeyRingPath))
     .SetApplicationName("Airside");
 
+// Checked here rather than discovered later, because Data Protection does not
+// touch the directory until something is first encrypted — and the first thing
+// that encrypts anything is issuing a session cookie. A key ring the process
+// cannot write therefore produces a control plane that starts cleanly, reports
+// healthy, migrates, seeds, accepts the setup token, creates the administrator,
+// and then throws a 500 on the very first login. The operator is told
+// "internal.unhandled" about a filesystem permission.
+//
+// This is exactly what a root-owned 0700 directory does to a container running
+// as a non-root user, which is what the installer used to create.
+KeyRingPreflight.Verify(storeOptions.KeyRingPath);
+
 // ---------------------------------------------------------------------------
 // Identity: the user store only. IdentityUserContext maps no role tables, so
 // Identity supplies password hashing, lockout, security stamps, and TOTP while

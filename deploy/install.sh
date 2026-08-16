@@ -95,6 +95,13 @@ mkdir -p "$AIRSIDE_DATA/keys" "$AIRSIDE_DATA/data" "$AIRSIDE_DATA/volumes" "$AIR
 
 # The Data Protection key ring decrypts every stored secret. Nothing but the
 # control plane has any business reading it.
+#
+# Ownership is set after the image is pulled, further down — the API runs as a
+# non-root user and these directories are created by root, so without a chown
+# the control plane cannot write to any of them. That is not hypothetical: it
+# left the API able to install, migrate, seed and create an administrator, and
+# then fail the first login with a 500, because issuing a session cookie is the
+# first thing that touches the key ring.
 chmod 700 "$AIRSIDE_DATA/keys"
 
 mkdir -p "$AIRSIDE_ROOT"
@@ -173,6 +180,44 @@ fi
 log "Starting Airside $AIRSIDE_VERSION"
 cd "$AIRSIDE_ROOT"
 docker compose pull --quiet
+
+# --- ownership ---------------------------------------------------------------
+#
+# The API image runs as a non-root user, and everything under $AIRSIDE_DATA was
+# created by root. Without this the control plane can read some of it and write
+# none of it — the key ring, the SQLite store, the managed volume root and the
+# backup directory are all unusable.
+#
+# The uid is read out of the image rather than assumed. The runtime image is
+# chiselled and has no shell to run `id` in, so /etc/passwd is copied out of a
+# container that is created and never started. AIRSIDE_UID overrides it, and
+# 1654 (the uid Microsoft's chiselled .NET images use) is the fallback.
+
+detect_app_uid() {
+  probe="airside-uid-probe-$$"
+  image=$(docker compose config --images 2>/dev/null | grep -E '/airside(:|$)' | head -1)
+
+  [ -n "$image" ] || return 1
+  docker create --name "$probe" "$image" >/dev/null 2>&1 || return 1
+
+  uid=$(docker cp "$probe:/etc/passwd" - 2>/dev/null | tar -xO 2>/dev/null | awk -F: '$1 == "app" { print $3 }')
+  docker rm -f "$probe" >/dev/null 2>&1
+
+  [ -n "$uid" ] || return 1
+  printf '%s' "$uid"
+}
+
+APP_UID="${AIRSIDE_UID:-$(detect_app_uid || true)}"
+
+if [ -z "$APP_UID" ]; then
+  APP_UID=1654
+  warn "could not read the API's uid from the image; assuming $APP_UID"
+fi
+
+log "Giving the control plane (uid $APP_UID) ownership of $AIRSIDE_DATA"
+chown -R "$APP_UID:$APP_UID" "$AIRSIDE_DATA"
+chmod 700 "$AIRSIDE_DATA/keys"
+
 docker compose up -d
 
 log "Waiting for the control plane to become healthy"
