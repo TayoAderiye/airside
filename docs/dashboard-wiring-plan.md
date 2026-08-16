@@ -1,0 +1,138 @@
+# Wiring the dashboard to the API
+
+The dashboard was built against an assumed contract before the API existed.
+`lib/api/mock.ts` says so in its own header, and suggests swapping itself out
+"once the v0.1 backend contract is available". That swap was done for about half
+the screens and never finished.
+
+This is the map and the order to finish it in.
+
+## How it fails today
+
+Not as a blank screen — as a screen that looks right. The two create flows are
+the worst of it:
+
+```
+components/databases/create-form.tsx:72
+  router.push(`/databases/new/provisioning?name=…&engine=…`)
+
+components/applications/create-form.tsx:61
+  setTimeout(() => router.push(`/applications/new/deploying?…`), 400)
+```
+
+Neither calls the API. Both navigate to a screen that renders a canned step list
+and a fake log, so the operator watches a convincing progress animation and ends
+with nothing provisioned, an empty list, and a detail page that 404s on a mock id.
+
+## What is already real
+
+Worth knowing before estimating any of this, because it is the hard part and it
+is done:
+
+- **`lib/api/client.ts`** — generated from the OpenAPI document, same-origin,
+  throws typed `ApiError` carrying ProblemDetails.
+- **`lib/api/jobs.ts` and `components/job-watcher.tsx`** — a correct SSE
+  subscription to a job's `eventsUrl`, typed from the schema, resuming on
+  `Last-Event-ID`. This is exactly what the create flows need and do not use.
+- **`components/preflight-list.tsx`, `problem-banner.tsx`, `confirm-dialog.tsx`** —
+  the three components the API's contract actually demands.
+
+So most of this work is calling things that exist, not building new machinery.
+
+## Screen by screen
+
+| Screen | State | Endpoints it needs |
+|---|---|---|
+| Login, Setup | real | — |
+| Overview | real | — |
+| Applications list | real | — |
+| Databases list | real | — |
+| Query console | real | — |
+| Domains, Notifications, Settings | real | — |
+| **Database create + provisioning** | **fake** | `POST /api/v1/databases` → job SSE |
+| **Application create + deploying** | **fake** | `POST /api/v1/applications`, `POST /{id}/deployments` → job SSE |
+| Application detail | mock | `GET /api/v1/applications/{id}`, `/deployments`, `/environment`, `/databases`, `/domains` |
+| Deployments | mock | `GET /api/v1/applications/{id}/deployments`, `POST /api/v1/deployments/{id}/rollback` |
+| Backups | mock | `GET /api/v1/databases/{id}/backups`, `POST /api/v1/system/backups` |
+| Audit | mock | `GET /api/v1/audit` |
+| Access | mock | `GET /api/v1/users`, `/roles`, `/permissions` |
+| Storage | mock | `GET /api/v1/volumes` |
+| Servers | mock | `GET /api/v1/host`, `GET /api/v1/system/info` |
+| Monitoring | mock | `GET /api/v1/workloads/{id}/metrics` |
+| **Networks** | mock | **no API exists** |
+| **Secrets** | mock | **no API exists as a standalone concept** |
+| Log streaming | mock | `GET /api/v1/databases/{id}/logs/stream` (databases only) |
+
+## The four gaps
+
+Everything above the line is rewiring. These four are decisions.
+
+**1. Networks has no API.** There is no `/api/v1/networks`. Airside creates a
+network per workload and the isolation model is the most important thing it does,
+so a read-only view of it is defensible — but it has to be built, endpoint first.
+
+**2. Secrets has no API as a screen.** Secrets are not a flat list in Airside:
+they are application environment variables (`/applications/{id}/environment`,
+with a separate audited `/reveal`) and database credentials
+(`/databases/{id}/credentials`). The mock screen invents a concept the product
+does not have.
+
+**3. Applications have no live log stream.** Databases do
+(`/databases/{id}/logs/stream`); applications only have
+`GET /api/v1/deployments/{id}/log`, which is a fetch, not a stream. Either the
+application log view is fetch-and-poll, or the API grows a stream to match.
+
+**4. System containers are not exposed.** `deploy/docker-compose.yml` claims they
+"are visible in the UI". Nothing implements that — no endpoint lists them and no
+screen shows them. Either build it or correct the comment; the comment is wrong
+today either way.
+
+## Order of work
+
+Sequenced by how badly each failure misleads, not by size.
+
+### Phase 1 — the flows that silently do nothing
+
+The create flows, both of them. An operator who clicks "New database", watches a
+progress bar, and gets nothing has been actively misled; every other mocked
+screen is merely wrong.
+
+- `create-form.tsx` (both) calls the API and receives `202 + JobAccepted`.
+- The provisioning and deploying screens swap static `JobProgress` for live
+  `JobWatcher`, which already exists and already works.
+- Delete the query-string handoff — the job id travels instead.
+- Failure path: the job's terminal event carries the error; show it rather than
+  leaving the animation running.
+
+This is the phase that turns the dashboard from a demonstration into a tool.
+
+### Phase 2 — detail pages
+
+Application detail, and deployments with rollback. Rollback is destructive and
+needs the typed-confirmation treatment the API already returns metadata for.
+
+### Phase 3 — read-only screens against endpoints that exist
+
+Audit, Access, Storage, Servers, Backups, Monitoring. Mechanical: each is a
+`client.GET` and a shape change. Monitoring needs the units note from the
+frontend brief — CPU is nanoseconds per second, not a percentage.
+
+### Phase 4 — the gaps
+
+Take the four decisions above. Networks and Secrets should probably be resolved
+by **removing the screens** in this release and adding them back when the API
+supports them, rather than shipping two more pages of invented data.
+
+### Phase 5 — make it impossible to regress
+
+- **Delete `lib/api/mock.ts`.** Once nothing imports it, remove the file. While it
+  exists, the next screen written in a hurry will import it.
+- Sidebar footer reads a hardcoded `v0.2`; it should read the real version, which
+  the UI already knows because the version gate baked it in.
+- Correct the compose comment about system containers.
+
+## What this does not cover
+
+Nothing here changes the API except the four gaps, and three of those may be
+resolved by removing a screen rather than adding an endpoint. The install path,
+the container split and the version handshake are all done and are not affected.
