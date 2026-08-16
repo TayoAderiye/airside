@@ -257,6 +257,58 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.ToTable("backups", (string)null);
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.DatabaseAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApplicationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AttachedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AttachedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CredentialId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("DatabaseInstanceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DetachedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DetachedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EnvKeyPrefix")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DatabaseInstanceId");
+
+                    b.HasIndex("ApplicationId", "DatabaseInstanceId", "DetachedAt");
+
+                    b.HasIndex("ApplicationId", "EnvKeyPrefix", "DetachedAt");
+
+                    b.ToTable("database_attachments", (string)null);
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.DatabaseCredential", b =>
                 {
                     b.Property<Guid>("Id")
@@ -302,6 +354,167 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.HasIndex("DatabaseInstanceId", "State");
 
                     b.ToTable("database_credentials", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.Deployment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApplicationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Branch")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("CommitMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("CommitSha")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ContainerId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1024)
+                        .HasColumnType("character varying(1024)");
+
+                    b.Property<string>("ImageDigest")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ImageRef")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("RolledBackFromDeploymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceKindSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("TriggerKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId", "Number")
+                        .IsUnique();
+
+                    b.HasIndex("ApplicationId", "StartedAt");
+
+                    b.ToTable("deployments", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.DeploymentLog", b =>
+                {
+                    b.Property<Guid>("DeploymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ByteCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Truncated")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("DeploymentId");
+
+                    b.ToTable("deployment_logs", (string)null);
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.EnvironmentVariable", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ApplicationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsSecret")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(32768)
+                        .HasColumnType("character varying(32768)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("environment_variables", (string)null);
                 });
 
             modelBuilder.Entity("Airside.Data.Entities.Host", b =>
@@ -834,6 +1047,56 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.ToTable("saved_queries", (string)null);
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.SourceCredential", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EncryptedSecret")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IsRegistry")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("RowVersion")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Username")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("source_credentials", (string)null);
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.UserRole", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -1124,6 +1387,77 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.ToTable("user_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.Application", b =>
+                {
+                    b.HasBaseType("Airside.Data.Entities.Workload");
+
+                    b.Property<string>("BuildContextPath")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("ContainerPort")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("CurrentDeploymentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DockerfileContent")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DockerfilePath")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("GitBranch")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid?>("GitCredentialId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("GitRepositoryUrl")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("HealthCheckCommandJson")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("HealthCheckExpectedStatus")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("HealthCheckIntervalSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("HealthCheckKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("HealthCheckPath")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("HealthCheckRetries")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("HealthCheckTimeoutSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("RegistryCredentialId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceImageRef")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.HasDiscriminator().HasValue("Application");
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.DatabaseInstance", b =>
                 {
                     b.HasBaseType("Airside.Data.Entities.Workload");
@@ -1203,6 +1537,25 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.Navigation("DatabaseInstance");
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.DatabaseAttachment", b =>
+                {
+                    b.HasOne("Airside.Data.Entities.Application", "Application")
+                        .WithMany("Attachments")
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Airside.Data.Entities.DatabaseInstance", "DatabaseInstance")
+                        .WithMany()
+                        .HasForeignKey("DatabaseInstanceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Application");
+
+                    b.Navigation("DatabaseInstance");
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.DatabaseCredential", b =>
                 {
                     b.HasOne("Airside.Data.Entities.DatabaseInstance", "DatabaseInstance")
@@ -1212,6 +1565,39 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                         .IsRequired();
 
                     b.Navigation("DatabaseInstance");
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.Deployment", b =>
+                {
+                    b.HasOne("Airside.Data.Entities.Application", "Application")
+                        .WithMany("Deployments")
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Application");
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.DeploymentLog", b =>
+                {
+                    b.HasOne("Airside.Data.Entities.Deployment", "Deployment")
+                        .WithOne("Log")
+                        .HasForeignKey("Airside.Data.Entities.DeploymentLog", "DeploymentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Deployment");
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.EnvironmentVariable", b =>
+                {
+                    b.HasOne("Airside.Data.Entities.Application", "Application")
+                        .WithMany("EnvironmentVariables")
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Application");
                 });
 
             modelBuilder.Entity("Airside.Data.Entities.JobResource", b =>
@@ -1360,6 +1746,11 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.Navigation("UserRoles");
                 });
 
+            modelBuilder.Entity("Airside.Data.Entities.Deployment", b =>
+                {
+                    b.Navigation("Log");
+                });
+
             modelBuilder.Entity("Airside.Data.Entities.Job", b =>
                 {
                     b.Navigation("Resources");
@@ -1382,6 +1773,15 @@ namespace Airside.Data.Migrations.Postgres.Migrations
             modelBuilder.Entity("Airside.Data.Entities.Workload", b =>
                 {
                     b.Navigation("Volumes");
+                });
+
+            modelBuilder.Entity("Airside.Data.Entities.Application", b =>
+                {
+                    b.Navigation("Attachments");
+
+                    b.Navigation("Deployments");
+
+                    b.Navigation("EnvironmentVariables");
                 });
 
             modelBuilder.Entity("Airside.Data.Entities.DatabaseInstance", b =>

@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using Airside.Api.Contracts;
 using Airside.Api.Features;
+using Airside.Api.Features.Applications;
 using Airside.Api.Features.Databases;
 using Airside.Api.Hosting;
 using Airside.Api.Realtime;
@@ -141,6 +142,8 @@ builder.Services.AddSingleton<AllocationGate>();
 builder.Services.AddScoped<DatabaseService>();
 builder.Services.AddScoped<IDatabaseWorkloadStore, DatabaseWorkloadStore>();
 builder.Services.AddScoped<IBackupStore, BackupStore>();
+builder.Services.AddScoped<ApplicationService>();
+builder.Services.AddScoped<IApplicationStore, ApplicationStore>();
 builder.Services.AddHostedService<HostDiscoveryService>();
 
 builder.Services.AddProblemDetails();
@@ -215,6 +218,7 @@ app.MapAccessEndpoints();
 app.MapSystemEndpoints();
 app.MapDatabaseEndpoints();
 app.MapBackupEndpoints();
+app.MapApplicationEndpoints();
 
 app.MapRealtimeEndpoints();
 if (app.Environment.IsDevelopment())

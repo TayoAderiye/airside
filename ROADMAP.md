@@ -111,7 +111,7 @@ comments, and `KEYS` in every form.
 
 ---
 
-## Phase 4 — Application deployment
+## Phase 4 — Application deployment ✅ *complete*
 
 **`Airside.Data`** — `Deployment`, `DeploymentLog`, `EnvironmentVariable`,
 `DatabaseAttachment`, `GitCredential`, `RegistryCredential`; migration

@@ -12,10 +12,11 @@ public class WorkloadConfiguration : IEntityTypeConfiguration<Workload>
         builder.ToTable("workloads");
         builder.HasKey(x => x.Id);
 
-        // TPH. Application arrives as a second subtype in Phase 4; adding it then
-        // is additive nullable columns, which the expand-then-contract rule allows.
+        // TPH. Adding Application is additive nullable columns, which is what the
+        // expand-then-contract rule requires of a single release.
         builder.HasDiscriminator(x => x.Kind)
-            .HasValue<DatabaseInstance>(Core.Workloads.WorkloadKind.Database);
+            .HasValue<DatabaseInstance>(Core.Workloads.WorkloadKind.Database)
+            .HasValue<Application>(Core.Workloads.WorkloadKind.Application);
 
         builder.Property(x => x.Kind).HasConversion<string>().HasMaxLength(32);
         builder.Property(x => x.Slug).HasMaxLength(32).IsRequired();

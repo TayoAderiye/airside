@@ -100,6 +100,36 @@ public sealed class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logge
         ArgumentNullException.ThrowIfNull(httpContext);
 
         var traceId = httpContext.TraceIdentifier;
+
+        // A malformed request body is the caller's problem, not a server fault.
+        // ASP.NET Core raises BadHttpRequestException with a 400 already on it,
+        // and swallowing that into a 500 tells the client to retry something that
+        // will never succeed — and pages whoever is watching error rates.
+        if (exception is BadHttpRequestException badRequest)
+        {
+            logger.LogDebug(exception, "Rejected a malformed request on {Method} {Path}",
+                httpContext.Request.Method, httpContext.Request.Path);
+
+            var problem400 = new ProblemDetails
+            {
+                Type = $"https://airside.dev/errors/{ErrorCodes.ValidationFailed}",
+                Title = "Request rejected",
+                Status = badRequest.StatusCode,
+
+                // The framework's message names the offending field and type
+                // without echoing the value, so it is safe and genuinely useful.
+                Detail = badRequest.Message,
+            };
+
+            problem400.Extensions["code"] = ErrorCodes.ValidationFailed;
+            problem400.Extensions["traceId"] = traceId;
+
+            httpContext.Response.StatusCode = badRequest.StatusCode;
+            await httpContext.Response.WriteAsJsonAsync(problem400, cancellationToken).ConfigureAwait(false);
+
+            return true;
+        }
+
         logger.LogError(exception, "Unhandled exception on {Method} {Path} ({TraceId})",
             httpContext.Request.Method, httpContext.Request.Path, traceId);
 

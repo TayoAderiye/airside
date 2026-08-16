@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Docker.DotNet" />
+    <PackageReference Include="LibGit2Sharp" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 

@@ -33,6 +33,15 @@
       ever needs replacing.
     -->
     <PackageVersion Include="Docker.DotNet" Version="3.125.15" />
+
+    <!--
+      Git cloning in-process. The alternatives were worse: shelling out to git
+      violates the no-host-commands rule and would put git in the API image, and
+      cloning inside a helper container means extracting a whole tree back out
+      through the archive API. LibGit2Sharp is a managed API over libgit2 with no
+      shell anywhere in it.
+    -->
+    <PackageVersion Include="LibGit2Sharp" Version="0.32.0" />
   </ItemGroup>
 
   <ItemGroup Label="Api">

@@ -51,6 +51,18 @@ public class AirsideDbContext(DbContextOptions<AirsideDbContext> options, TimePr
 
     public DbSet<Volume> Volumes => Set<Volume>();
 
+    public DbSet<Application> Applications => Set<Application>();
+
+    public DbSet<Deployment> Deployments => Set<Deployment>();
+
+    public DbSet<DeploymentLog> DeploymentLogs => Set<DeploymentLog>();
+
+    public DbSet<EnvironmentVariable> EnvironmentVariables => Set<EnvironmentVariable>();
+
+    public DbSet<DatabaseAttachment> DatabaseAttachments => Set<DatabaseAttachment>();
+
+    public DbSet<SourceCredential> SourceCredentials => Set<SourceCredential>();
+
     public DbSet<Backup> Backups => Set<Backup>();
 
     public DbSet<Restore> Restores => Set<Restore>();

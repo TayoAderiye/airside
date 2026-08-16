@@ -17,6 +17,13 @@
     <!-- Airside runs in a Linux container with a fixed locale. -->
     <InvariantGlobalization>true</InvariantGlobalization>
 
+    <!--
+      One place. The API reports this, the installer pins it, and the updater
+      rewrites the image tag that carries it — a version that disagrees with the
+      tag is how a rollback targets the wrong build.
+    -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>
     <AssemblyName>$(MSBuildProjectName)</AssemblyName>
     <Deterministic>true</Deterministic>

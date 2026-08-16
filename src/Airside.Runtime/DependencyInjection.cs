@@ -2,6 +2,7 @@ using Airside.Core.Containers;
 using Airside.Core.Databases;
 using Airside.Core.Jobs;
 using Airside.Core.Workloads;
+using Airside.Runtime.Applications;
 using Airside.Runtime.Databases;
 using Airside.Runtime.Jobs;
 using Airside.Core.Hosting;
@@ -84,6 +85,11 @@ public static class DependencyInjection
 
         services.AddScoped<IJobHandler, DatabaseProvisionHandler>();
         services.AddSingleton<BackupExecutor>();
+        services.AddSingleton<GitSource>();
+        services.AddSingleton<EnvironmentRenderer>();
+
+        services.AddScoped<IJobHandler, DeployHandler>();
+        services.AddScoped<IJobHandler, AttachmentHandler>();
         services.AddScoped<IJobHandler, DatabaseBackupHandler>();
         services.AddScoped<IJobHandler, DatabaseRestoreHandler>();
         services.AddScoped<IJobHandler, RotateCredentialsHandler>();
