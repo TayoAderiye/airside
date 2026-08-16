@@ -26,6 +26,16 @@ export function SetupWizard() {
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
 
+  /**
+   * Whether the account exists, even though we are still on this screen.
+   *
+   * The setup token is consumed by the first successful call, so once this is
+   * true the wizard can never be run again — and re-posting it answers
+   * "the setup token is missing, expired, or incorrect", which is true and
+   * completely misleading about what happened.
+   */
+  const [accountCreated, setAccountCreated] = useState(false)
+
   const canContinue =
     (step === 0 && token.length >= 16) ||
     (step === 1 && email.includes('@') && password.length >= 8 && displayName.length > 0) ||
@@ -35,15 +45,23 @@ export function SetupWizard() {
     setBusy(true)
     setError(null)
     try {
-      await client.POST('/api/v1/setup/complete', {
-        body: {
-          setupToken: token,
-          email,
-          password,
-          displayName,
-          instanceName,
-        },
-      })
+      // Guarded, not just attempted once. These are two calls and the first is
+      // not repeatable, so a failure in the second must not drag the first back
+      // through a token that no longer exists.
+      if (!accountCreated) {
+        await client.POST('/api/v1/setup/complete', {
+          body: {
+            setupToken: token,
+            email,
+            password,
+            displayName,
+            instanceName,
+          },
+        })
+
+        setAccountCreated(true)
+      }
+
       await client.POST('/api/v1/auth/login', {
         body: { email, password, totpCode: null },
       })
@@ -116,6 +134,28 @@ export function SetupWizard() {
               </Field>
             </>
           )}
+          {/*
+            Said before the error, because it changes what the error means. Once
+            the account exists the only way forward is signing in — the wizard
+            cannot be repeated, and an operator staring at a failure on the last
+            step has no way to know their account was created a moment ago.
+          */}
+          {accountCreated && (
+            <div className="rounded-lg border border-running/40 bg-running-soft/40 px-4 py-3">
+              <p className="text-sm text-foreground">
+                Your administrator account was created. Setup is finished and the
+                one-time token has been used, so continue by signing in.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.replace('/login')}
+                className="mt-2 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+              >
+                Go to sign in
+              </button>
+            </div>
+          )}
+
           {error != null && <ProblemBanner error={error} />}
         </div>
 

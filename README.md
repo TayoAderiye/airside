@@ -7,7 +7,7 @@ learning Kubernetes and without a monthly bill.
 Airside manages Docker on the host it runs on. It is not a cluster orchestrator,
 and it is not trying to become one.
 
-> **Status: 0.1.2, pre-release.** The code is complete through the roadmap and
+> **Status: 0.1.3, pre-release.** The code is complete through the roadmap and
 > heavily tested — but the installer has not yet been run end to end on a fresh
 > Linux host. See [Status](#status) before putting anything real on it.
 
@@ -102,25 +102,29 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Status
 
-Everything on the roadmap is built, with 452 tests passing. Much of it has been
+Everything on the roadmap is built, with 459 tests passing. Much of it has been
 verified against real infrastructure rather than mocks — real Docker containers,
 a real Caddy, a real private registry, a real SMTP server, real DNS.
 
-**What has not happened yet:** the installer has never been run on a fresh Linux
-host. All verification so far has been on macOS with Docker Desktop. `install.sh`
-writes `/etc/docker/daemon.json`, creates `/var/lib/airside`, and detects the
-host's docker group — none of which has executed once.
+**The installer has now been run on a fresh Linux host** — Ubuntu 24.04 on EC2,
+2 GB, x86-64. It found four bugs, all fixed:
 
-For a sense of what that means in practice: building the images turned up that
-both health checks called `wget`, which the chiselled runtime image does not
-contain. The compose healthcheck could only ever fail, and the installer's
-readiness loop would have ended every install with *"the API did not become
-healthy"* on a host where the API was fine. Both are fixed, but they were found
-by running the thing, and the parts that still have not been run are the parts
-still likely to be wrong.
+- It never downloaded the compose file it then ran, so every install stopped at
+  `docker compose pull`.
+- Both health checks called `wget`, which the chiselled runtime image does not
+  contain — so the installer ended every install with *"the API did not become
+  healthy"* on a host where the API was fine.
+- The control plane did not own its own data directory, which surfaced as a 500
+  on the first login and nowhere earlier.
+- A fresh install served a blank page, because routes are only created when a
+  domain is bound and a new box has none.
 
-So: expect the first install to break. If you are trying this early, that is the
-part worth reporting.
+Two of those reported success and failed later, somewhere that did not name the
+cause. [ROADMAP.md](ROADMAP.md) has the detail.
+
+So the install path works, but 0.1.3 has not yet been run end to end on a clean
+box — only its parts have. Expect rough edges, and the first install is still
+the most useful thing to report on.
 
 Known gaps, recorded rather than hidden:
 
