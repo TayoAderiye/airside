@@ -16,7 +16,33 @@ public interface IQueryConsole
     QueryDialect Dialect { get; }
 
     Task<Result<QueryOutcome>> ExecuteAsync(QueryExecution execution, CancellationToken ct);
+
+    /// <summary>
+    /// The tables and columns an operator can query, or a failure explaining why
+    /// there are none to list.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in the dashboard because introspection is per-engine SQL,
+    /// and the moment the frontend holds one <c>information_schema</c> query it
+    /// holds four — which is the pile of engine checks the capability model
+    /// exists to prevent. A console with no query to type into it is a text box
+    /// pointed at a database whose contents are a guess.
+    /// </remarks>
+    Task<Result<DatabaseSchema>> DescribeAsync(QueryExecution execution, CancellationToken ct);
 }
+
+public sealed record DatabaseSchema(IReadOnlyList<SchemaTable> Tables);
+
+/// <param name="Namespace">
+/// Schema in Postgres, database in MySQL, absent elsewhere. Carried separately so
+/// the dashboard can group by it without parsing a qualified name.
+/// </param>
+public sealed record SchemaTable(
+    string? Namespace,
+    string Name,
+    IReadOnlyList<SchemaColumn> Columns);
+
+public sealed record SchemaColumn(string Name, string DataType, bool Nullable, bool IsPrimaryKey);
 
 public sealed record QueryExecution(
     DatabaseEndpoint Endpoint,

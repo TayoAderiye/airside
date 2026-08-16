@@ -755,6 +755,77 @@ correctly here — Caddy really did log these at `error`.
 
 ---
 
+## A slug you could never reuse — **done**
+
+Reported with the exception, which named the cause exactly: deleting an
+application and creating another with the same name returned
+`23505: duplicate key value violates unique constraint "IX_workloads_HostId_Slug"`.
+
+The configuration already said what it should do:
+
+```csharp
+// Unique among non-deleted rows only, so a slug can be reused after a delete.
+builder.HasIndex(x => new { x.HostId, x.Slug })
+    .IsUnique()
+    .HasFilter(null);
+```
+
+`HasFilter(null)` clears a filter rather than setting one, so the index covered
+soft-deleted rows and the comment described behaviour that had never existed.
+
+It reached the operator as a 500 rather than a conflict because the API's own
+duplicate check reads through the soft-delete query filter: it sees no clash, so
+it cannot warn about one, and the constraint fires after the request has already
+been judged valid.
+
+Fixed with a partial index and a migration for both providers, then checked
+against a real Postgres: apply the migrations, create `test1`, soft-delete it,
+create `test1` again — which now succeeds — and confirm a second *live* `test1`
+is still refused. The index Postgres ends up with is
+`... USING btree ("HostId", "Slug") WHERE ("DeletedAt" IS NULL)`.
+
+Four tests against a real SQLite file, because the in-memory provider has no
+indexes and would pass with the bug still present. All four fail against the old
+configuration.
+
+---
+
+## Reading a database before querying it — **done**
+
+The console shipped as a bare text box. Writing anything required already
+knowing the table names, which on a database you did not create is a guess.
+
+Introspection is in the API, per engine, because the moment the dashboard holds
+one `information_schema` query it holds four — the pile of engine checks the
+capability model exists to prevent. Postgres and MySQL contribute a query
+returning six fixed fields; the grouping into tables and columns is shared.
+MongoDB and Redis contribute a *reason* instead: collections have no fixed
+columns, and Redis has keys, where the one listing command is the one blocked
+outright because `KEYS *` blocks the server for the length of the scan.
+
+Verified against a real Postgres with a composite primary key, which is the case
+a naive join gets wrong: both members of `line_items`' key come back marked, and
+nullability and types survive the CSV round trip.
+
+---
+
+## Watching a deployment happen — **done**
+
+The build is the slow part of a deployment, and its output was accumulated in
+memory and written only once the build ended. So the screen showed
+"Building image — 25%" and nothing else for minutes, which is indistinguishable
+from a build that has hung.
+
+The output is now flushed every two seconds while the build runs, and the
+deploying screen polls it. The timer is cancelled before the final write so it
+cannot race and leave a partial snapshot as the stored log.
+
+Polled rather than streamed on purpose: the log is a single capped column on the
+deployment row, not an append-only feed, so there is no cursor to resume from and
+a socket would carry the same full string each time.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.

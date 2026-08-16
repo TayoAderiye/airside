@@ -100,3 +100,17 @@ public sealed record QueryHistoryDto(
     int RowsAffected,
     bool Success,
     string? ErrorMessage);
+
+/// <param name="Namespace">
+/// The Postgres schema or MySQL database a table sits in, absent where the engine
+/// has no such grouping. Separate from the name so the dashboard can group on it
+/// without parsing a qualified string.
+/// </param>
+public sealed record SchemaTableDto(
+    string? Namespace,
+    string Name,
+    IReadOnlyList<SchemaColumnDto> Columns);
+
+public sealed record SchemaColumnDto(string Name, string DataType, bool Nullable, bool IsPrimaryKey);
+
+public sealed record DatabaseSchemaDto(IReadOnlyList<SchemaTableDto> Tables);

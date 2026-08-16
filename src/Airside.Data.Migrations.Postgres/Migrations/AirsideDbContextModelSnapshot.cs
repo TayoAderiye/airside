@@ -1995,7 +1995,8 @@ namespace Airside.Data.Migrations.Postgres.Migrations
                     b.HasIndex("DeletedAt");
 
                     b.HasIndex("HostId", "Slug")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"DeletedAt\" IS NULL");
 
                     b.ToTable("workloads", (string)null);
 

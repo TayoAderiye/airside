@@ -36,6 +36,7 @@ internal static class BackupEndpoints
             .RequirePermission(Permissions.DatabaseRotateCredentials);
 
         databases.MapPost("/query", QueryAsync).RequirePermission(Permissions.DatabaseQuery);
+        databases.MapGet("/schema", SchemaAsync).RequirePermission(Permissions.DatabaseQuery);
         databases.MapGet("/query/history", HistoryAsync).RequirePermission(Permissions.DatabaseQuery);
 
         var backups = app.MapGroup("/api/v1/backups/{backupId:guid}").WithTags("Backups").RequireAuthorization();
@@ -464,49 +465,15 @@ internal static class BackupEndpoints
             .FirstOrDefaultAsync(d => d.Id == id, ct)
             .ConfigureAwait(false);
 
-        DatabaseEndpoint endpoint;
-        DatabaseCredentialValue credentialValue;
-        DatabaseEngineKind engine;
-        string slug;
-        var isControlPlane = false;
+        var resolved = await ResolveQueryTargetAsync(database, id, protector, controlPlane, ct)
+            .ConfigureAwait(false);
 
-        if (database?.ContainerId is not null)
+        if (resolved.IsFailure)
         {
-            var credential = database.Credentials.First(c => c.IsPrimary && c.State == CredentialState.Active);
-            var password = protector.Unprotect(credential.EncryptedPassword);
-
-            if (password.IsFailure)
-            {
-                return password.Failure!.ToProblem();
-            }
-
-            endpoint = new DatabaseEndpoint(database.ContainerId, database.Slug, 0, database.DatabaseName);
-            credentialValue = new DatabaseCredentialValue(credential.Username, password.Value);
-            engine = database.Engine;
-            slug = database.Slug;
+            return resolved.Failure!.ToProblem();
         }
-        else if (SystemWorkloadReader.ResolveContainerName(id) == AirsideLabels.SystemContainers.Database)
-        {
-            // Airside's own store. Reachable here because refusing did not
-            // withhold anything — the documented recovery path is a psql shell on
-            // the host — while costing the operator the tool that would have
-            // answered the question they came with.
-            var target = await controlPlane.ResolveAsync(ct).ConfigureAwait(false);
 
-            if (target.IsFailure)
-            {
-                return target.Failure!.ToProblem();
-            }
-
-            (endpoint, credentialValue) = target.Value;
-            engine = ControlPlaneQueryTarget.Engine;
-            slug = AirsideLabels.SystemContainers.Database;
-            isControlPlane = true;
-        }
-        else
-        {
-            return new Error(ErrorCodes.WorkloadNotFound, "No such running database.").ToProblem();
-        }
+        var (endpoint, credentialValue, engine, slug, isControlPlane) = resolved.Value;
 
         var userId = CurrentUserId(http);
 
@@ -562,6 +529,133 @@ internal static class BackupEndpoints
                 result.Value.RowsAffected,
                 result.Value.Truncated,
                 (int)result.Value.Duration.TotalMilliseconds));
+    }
+
+    /// <summary>
+    /// The tables and columns available to query.
+    /// </summary>
+    /// <remarks>
+    /// Behind <c>database.query</c> rather than <c>database.read</c>: knowing a
+    /// schema is knowing what is stored, which is closer to reading the contents
+    /// than to seeing that a database exists.
+    /// </remarks>
+    private static async Task<Results<Ok<DatabaseSchemaDto>, ProblemHttpResult>> SchemaAsync(
+        Guid id,
+        AirsideDbContext db,
+        IQueryConsoleFactory consoles,
+        ISecretProtector protector,
+        ControlPlaneQueryTarget controlPlane,
+        CancellationToken ct)
+    {
+        var database = await db.Databases
+            .Include(d => d.Credentials)
+            .FirstOrDefaultAsync(d => d.Id == id, ct)
+            .ConfigureAwait(false);
+
+        var resolved = await ResolveQueryTargetAsync(database, id, protector, controlPlane, ct)
+            .ConfigureAwait(false);
+
+        if (resolved.IsFailure)
+        {
+            return resolved.Failure!.ToProblem();
+        }
+
+        var target = resolved.Value;
+        var console = consoles.Create(target.Engine, target.Credential.Username);
+
+        var schema = await console.DescribeAsync(
+            new QueryExecution(
+                target.Endpoint,
+                target.Credential,
+                string.Empty,
+                MaxRows: 20_000,
+                TimeSpan.FromSeconds(30),
+                CallerHasDestructivePermission: false),
+            ct).ConfigureAwait(false);
+
+        if (schema.IsFailure)
+        {
+            return schema.Failure!.ToProblem();
+        }
+
+        return TypedResults.Ok(new DatabaseSchemaDto(
+            [
+                .. schema.Value.Tables.Select(t => new SchemaTableDto(
+                    t.Namespace,
+                    t.Name,
+                    [
+                        .. t.Columns.Select(c => new SchemaColumnDto(
+                            c.Name, c.DataType, c.Nullable, c.IsPrimaryKey)),
+                    ])),
+            ]));
+    }
+
+    /// <summary>
+    /// Everything needed to reach a database's console, whichever kind it is.
+    /// </summary>
+    private readonly record struct QueryTarget(
+        DatabaseEndpoint Endpoint,
+        DatabaseCredentialValue Credential,
+        DatabaseEngineKind Engine,
+        string Slug,
+        bool IsControlPlane);
+
+    /// <summary>
+    /// Resolves a workload id to a console target: a managed database, or
+    /// Airside's own store.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the query endpoint and the schema browser, because the two must
+    /// agree about what they are pointed at. A browser that resolved differently
+    /// from the console beside it would list one database's tables and run
+    /// statements against another.
+    /// </remarks>
+    private static async Task<Result<QueryTarget>> ResolveQueryTargetAsync(
+        DatabaseInstance? database,
+        Guid id,
+        ISecretProtector protector,
+        ControlPlaneQueryTarget controlPlane,
+        CancellationToken ct)
+    {
+        if (database?.ContainerId is not null)
+        {
+            var credential = database.Credentials.First(c => c.IsPrimary && c.State == CredentialState.Active);
+            var password = protector.Unprotect(credential.EncryptedPassword);
+
+            if (password.IsFailure)
+            {
+                return password.Failure!;
+            }
+
+            return new QueryTarget(
+                new DatabaseEndpoint(database.ContainerId, database.Slug, 0, database.DatabaseName),
+                new DatabaseCredentialValue(credential.Username, password.Value),
+                database.Engine,
+                database.Slug,
+                IsControlPlane: false);
+        }
+
+        if (SystemWorkloadReader.ResolveContainerName(id) != AirsideLabels.SystemContainers.Database)
+        {
+            return new Error(ErrorCodes.WorkloadNotFound, "No such running database.");
+        }
+
+        // Airside's own store. Reachable because refusing withheld nothing — the
+        // documented recovery path is a psql shell on the host — while costing
+        // the operator the tool that would have answered their question.
+        var target = await controlPlane.ResolveAsync(ct).ConfigureAwait(false);
+
+        if (target.IsFailure)
+        {
+            return target.Failure!;
+        }
+
+        return new QueryTarget(
+            target.Value.Endpoint,
+            target.Value.Credential,
+            ControlPlaneQueryTarget.Engine,
+            AirsideLabels.SystemContainers.Database,
+            IsControlPlane: true);
     }
 
     private const int HistoryPerDatabase = 100;

@@ -41,6 +41,20 @@ internal abstract class ExecQueryConsole(IContainerRuntime runtime, ICommandPoli
 
     protected abstract QueryOutcome Parse(string output, int maxRows, TimeSpan duration);
 
+    /// <summary>
+    /// A statement listing every column of every user table, or <c>null</c> where
+    /// the engine has no such thing.
+    /// </summary>
+    /// <remarks>
+    /// Six fields in a fixed order — namespace, table, column, type, nullable,
+    /// primary key — so the grouping below is engine-agnostic and each engine
+    /// contributes only the query that produces them.
+    /// </remarks>
+    protected virtual string? IntrospectionStatement => null;
+
+    /// <summary>Why this engine has no tables to list. Only read when there is no statement.</summary>
+    protected virtual string NoSchemaReason => "This engine does not expose tables and columns.";
+
     public async Task<Result<QueryOutcome>> ExecuteAsync(QueryExecution execution, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(execution);
@@ -52,6 +66,14 @@ internal abstract class ExecQueryConsole(IContainerRuntime runtime, ICommandPoli
             return gate.Failure!;
         }
 
+        return await ExecuteWithoutPolicyAsync(execution, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The exec itself, with the command policy already decided.</summary>
+    private async Task<Result<QueryOutcome>> ExecuteWithoutPolicyAsync(
+        QueryExecution execution,
+        CancellationToken ct)
+    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(execution.Timeout);
 
@@ -90,6 +112,67 @@ internal abstract class ExecQueryConsole(IContainerRuntime runtime, ICommandPoli
 
         return Parse(Encoding.UTF8.GetString(output.ToArray()), execution.MaxRows, stopwatch.Elapsed);
     }
+
+    /// <summary>
+    /// Lists the tables and columns available to query.
+    /// </summary>
+    /// <remarks>
+    /// The introspection statement bypasses the command policy deliberately: it
+    /// is written here, not by the caller, and running it through a gate meant
+    /// for user input would let a Redis-shaped rule reject Airside's own query.
+    /// </remarks>
+    public async Task<Result<DatabaseSchema>> DescribeAsync(QueryExecution execution, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(execution);
+
+        if (IntrospectionStatement is not { } statement)
+        {
+            return new Error("query.schema_unavailable", NoSchemaReason);
+        }
+
+        // A generous row cap: a wide schema is thousands of columns, and a
+        // truncated one silently hides tables from the browser.
+        var introspection = execution with { Statement = statement, MaxRows = 20_000 };
+        var outcome = await ExecuteWithoutPolicyAsync(introspection, ct).ConfigureAwait(false);
+
+        if (outcome.IsFailure)
+        {
+            return outcome.Failure!;
+        }
+
+        var tables = outcome.Value.Rows
+            .Where(r => r.Count >= 6)
+            .Select(r => new
+            {
+                Namespace = Field(r, 0),
+                Table = Field(r, 1),
+                Column = new SchemaColumn(
+                    Field(r, 2) ?? string.Empty,
+                    Field(r, 3) ?? string.Empty,
+                    IsTrue(Field(r, 4)),
+                    IsTrue(Field(r, 5))),
+            })
+            .Where(x => !string.IsNullOrEmpty(x.Table))
+            .GroupBy(x => (x.Namespace, x.Table))
+            .Select(g => new SchemaTable(
+                string.IsNullOrEmpty(g.Key.Namespace) ? null : g.Key.Namespace,
+                g.Key.Table!,
+                [.. g.Select(x => x.Column)]))
+            .ToList();
+
+        return new DatabaseSchema(tables);
+    }
+
+    private static string? Field(IReadOnlyList<object?> row, int index) =>
+        index < row.Count ? row[index]?.ToString() : null;
+
+    /// <summary>
+    /// Engines disagree about how to spell a boolean in text output: Postgres and
+    /// MySQL's <c>information_schema</c> answer YES/NO, and a hand-written
+    /// <c>CASE</c> can just as easily produce 1/0 or t/f.
+    /// </summary>
+    private static bool IsTrue(string? value) =>
+        value is "YES" or "yes" or "t" or "true" or "TRUE" or "1";
 
     protected static string Truncate(string text) => text.Length <= 2000 ? text : text[..2000] + "…";
 
@@ -190,12 +273,48 @@ internal sealed class PostgresQueryConsole(IContainerRuntime runtime, ICommandPo
 
     protected override QueryOutcome Parse(string output, int maxRows, TimeSpan duration) =>
         ParseDelimited(output, ',', maxRows, duration);
+
+    /// <remarks>
+    /// The catalogue schemas are excluded: an operator opening the browser wants
+    /// their own tables, and <c>pg_catalog</c> alone is a hundred relations that
+    /// bury them.
+    /// </remarks>
+    protected override string? IntrospectionStatement => """
+        select c.table_schema, c.table_name, c.column_name, c.data_type, c.is_nullable,
+               case when pk.column_name is null then 'NO' else 'YES' end
+        from information_schema.columns c
+        left join (
+          select kcu.table_schema, kcu.table_name, kcu.column_name
+          from information_schema.table_constraints tc
+          join information_schema.key_column_usage kcu
+            on tc.constraint_name = kcu.constraint_name
+           and tc.table_schema = kcu.table_schema
+          where tc.constraint_type = 'PRIMARY KEY'
+        ) pk on pk.table_schema = c.table_schema
+            and pk.table_name = c.table_name
+            and pk.column_name = c.column_name
+        where c.table_schema not in ('pg_catalog', 'information_schema')
+        order by c.table_schema, c.table_name, c.ordinal_position
+        """;
 }
 
 internal sealed class MySqlQueryConsole(IContainerRuntime runtime, ICommandPolicy policy, string username)
     : ExecQueryConsole(runtime, policy)
 {
     public override QueryDialect Dialect => QueryDialect.Sql;
+
+    /// <remarks>
+    /// MySQL calls a namespace a database, so <c>table_schema</c> here is what an
+    /// operator picked when provisioning rather than a grouping inside it. The
+    /// server's own four are excluded for the same reason as Postgres's two.
+    /// </remarks>
+    protected override string? IntrospectionStatement => """
+        select table_schema, table_name, column_name, data_type, is_nullable,
+               if(column_key = 'PRI', 'YES', 'NO')
+        from information_schema.columns
+        where table_schema not in ('mysql', 'performance_schema', 'information_schema', 'sys')
+        order by table_schema, table_name, ordinal_position
+        """;
 
     protected override IReadOnlyList<string> BuildArgv(QueryExecution execution) =>
     [
@@ -214,6 +333,16 @@ internal sealed class MySqlQueryConsole(IContainerRuntime runtime, ICommandPolic
 internal sealed class MongoQueryConsole(IContainerRuntime runtime, ICommandPolicy policy, string username)
     : ExecQueryConsole(runtime, policy)
 {
+    /// <remarks>
+    /// Collections have no declared columns. Sampling documents would produce a
+    /// field list that is true of the documents sampled and of nothing else,
+    /// which on a schema browser reads as a guarantee. Saying there is no schema
+    /// is the accurate answer.
+    /// </remarks>
+    protected override string NoSchemaReason =>
+        "MongoDB collections have no fixed columns. Use db.getCollectionNames() to list collections, "
+        + "and findOne() to see the shape of a document.";
+
     public override QueryDialect Dialect => QueryDialect.MongoShell;
 
     protected override IReadOnlyList<string> BuildArgv(QueryExecution execution) =>
@@ -252,6 +381,15 @@ internal sealed class MongoQueryConsole(IContainerRuntime runtime, ICommandPolic
 internal sealed class RedisQueryConsole(IContainerRuntime runtime, ICommandPolicy policy)
     : ExecQueryConsole(runtime, policy)
 {
+    /// <remarks>
+    /// Redis has keys, not tables. Listing them is the one thing that must not be
+    /// offered casually — <c>KEYS *</c> blocks the server for the length of the
+    /// scan, which is why the command policy refuses it outright.
+    /// </remarks>
+    protected override string NoSchemaReason =>
+        "Redis has keys rather than tables. Use SCAN to walk the keyspace; KEYS is blocked because it "
+        + "blocks the server for the length of the scan.";
+
     public override QueryDialect Dialect => QueryDialect.RedisCommand;
 
     /// <summary>

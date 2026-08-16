@@ -30,9 +30,19 @@ public class WorkloadConfiguration : IEntityTypeConfiguration<Workload>
         // Unique among non-deleted rows only, so a slug can be reused after a
         // delete. History stays unambiguous because audit, backup, and deployment
         // rows carry both the workload id and a slug snapshot.
+        //
+        // This said exactly that and then called HasFilter(null), which clears the
+        // filter rather than setting one — so the index covered soft-deleted rows
+        // and a slug could never be reused. Deleting an application and creating
+        // another with the same name produced a 500 from the database, after the
+        // API's own conflict check had passed: that check reads through the soft
+        // delete filter, so it sees no clash and cannot warn about one.
+        //
+        // Both providers accept the double-quoted form; the columns are
+        // PascalCase even though the tables are not.
         builder.HasIndex(x => new { x.HostId, x.Slug })
             .IsUnique()
-            .HasFilter(null);
+            .HasFilter("\"DeletedAt\" IS NULL");
 
         builder.HasOne(x => x.Host)
             .WithMany()

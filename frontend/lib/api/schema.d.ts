@@ -1839,6 +1839,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/databases/{id}/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DatabaseSchemaDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/databases/{id}/backups": {
         parameters: {
             query?: never;
@@ -3812,6 +3849,20 @@ export interface components {
             networkTxBytes: number | string;
             /** Format: int32 */
             sampleCount: number | string;
+        };
+        DatabaseSchemaDto: {
+            tables: components["schemas"]["SchemaTableDto"][];
+        };
+        SchemaTableDto: {
+            namespace: null | string;
+            name: string;
+            columns: components["schemas"]["SchemaColumnDto"][];
+        };
+        SchemaColumnDto: {
+            name: string;
+            dataType: string;
+            nullable: boolean;
+            isPrimaryKey: boolean;
         };
         MfaEnrolmentDto: {
             secret: string;

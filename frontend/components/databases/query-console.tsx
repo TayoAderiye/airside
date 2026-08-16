@@ -23,8 +23,20 @@ const STARTERS: Record<string, string> = {
   redis: 'SCAN 0 COUNT 20',
 }
 
-export function QueryConsole({ db }: { db: Db }) {
-  const [statement, setStatement] = useState(STARTERS[db.engine] ?? '')
+export function QueryConsole({
+  db,
+  initialStatement,
+}: {
+  db: Db
+
+  /**
+   * Seeded by the schema browser when a table is picked. The component is
+   * remounted rather than updated so an in-progress statement is never replaced
+   * under the cursor.
+   */
+  initialStatement?: string
+}) {
+  const [statement, setStatement] = useState(initialStatement ?? STARTERS[db.engine] ?? '')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState<unknown>(null)

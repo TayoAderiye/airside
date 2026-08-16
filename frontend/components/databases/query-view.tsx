@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { AlertTriangle, Database } from 'lucide-react'
 
 import { QueryConsole } from '@/components/databases/query-console'
+import { SchemaBrowser, qualify } from '@/components/databases/schema-browser'
 import { ProblemBanner } from '@/components/problem-banner'
 import { StatusDot } from '@/components/status-badge'
 import { EmptyState, PageHeader, Panel } from '@/components/ui/panel'
@@ -44,6 +45,11 @@ export function QueryView() {
 
   const selected = useMemo(() => rows.find((d) => d.id === selectedId), [rows, selectedId])
 
+  // Bumped when a table is picked, which remounts the console with a fresh
+  // starter statement. Without it the console keeps whatever was typed and the
+  // click appears to do nothing.
+  const [starter, setStarter] = useState<{ text: string; nonce: number } | null>(null)
+
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
@@ -59,6 +65,7 @@ export function QueryView() {
         />
       ) : (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[240px_1fr]">
+          <div className="flex flex-col gap-4">
           <Panel title="Databases" bodyClassName="p-0">
             <ul>
               {rows.map((d) => (
@@ -85,6 +92,20 @@ export function QueryView() {
               ))}
             </ul>
           </Panel>
+
+          <Panel title="Schema" bodyClassName="max-h-[28rem] overflow-auto p-0">
+            <SchemaBrowser
+              databaseId={selected.id}
+              onSelectTable={(table) =>
+                setStarter({
+                  text: `SELECT ${table.columns.slice(0, 8).map((c) => c.name).join(', ')}\nFROM ${qualify(table)}\nLIMIT 50;`,
+                  nonce: Date.now(),
+                })
+              }
+            />
+          </Panel>
+          </div>
+
           <div className="flex min-w-0 flex-col gap-3">
             {selected.isSystem && (
               <p className="flex items-start gap-2 rounded-md border border-degraded/40 bg-degraded/10 px-3 py-2 text-xs text-degraded">
@@ -97,7 +118,11 @@ export function QueryView() {
                 </span>
               </p>
             )}
-            <QueryConsole key={selected.id} db={selected} />
+            <QueryConsole
+              key={`${selected.id}:${starter?.nonce ?? 0}`}
+              db={selected}
+              initialStatement={starter?.text}
+            />
           </div>
         </div>
       )}

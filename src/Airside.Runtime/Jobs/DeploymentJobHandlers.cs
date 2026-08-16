@@ -124,6 +124,16 @@ public sealed class DeployHandler(
     private static readonly TimeSpan HealthTimeout = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// How often the partial build log is written while a build is running.
+    /// </summary>
+    /// <remarks>
+    /// Two seconds: often enough that the dashboard looks live, rare enough that
+    /// a ten-minute build is three hundred writes of a capped string rather than
+    /// one per output line.
+    /// </remarks>
+    private static readonly TimeSpan BuildLogFlushInterval = TimeSpan.FromSeconds(2);
+
     public string JobType => ApplicationJobTypes.Deploy;
 
     public async Task<Result> ExecuteAsync(IJobContext context, CancellationToken ct)
@@ -142,9 +152,54 @@ public sealed class DeployHandler(
         await store.SetStateAsync(app.Id, ApplicationState.Building.ToString(), ct).ConfigureAwait(false);
 
         var buildLog = new System.Text.StringBuilder();
-        var progress = new Progress<string>(line => buildLog.Append(line));
+
+        // Locked because the flusher below reads it from another thread while
+        // Docker's progress callbacks keep appending.
+        var buildLogLock = new object();
+
+        var progress = new Progress<string>(line =>
+        {
+            lock (buildLogLock)
+            {
+                buildLog.Append(line);
+            }
+        });
+
+        string SnapshotBuildLog()
+        {
+            lock (buildLogLock)
+            {
+                return buildLog.ToString();
+            }
+        }
 
         ImageSummary image;
+
+        // The build is the long part of a deployment — minutes on a first
+        // `npm ci` — and its output was only written once it finished. So the
+        // screen showed "Building image, 25%" and nothing else for the whole of
+        // it, which is indistinguishable from a hung build. Flushing on a timer
+        // lets the dashboard show the output while it is still happening.
+        using var flushing = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+        var flusher = Task.Run(
+            async () =>
+            {
+                try
+                {
+                    while (!flushing.IsCancellationRequested)
+                    {
+                        await Task.Delay(BuildLogFlushInterval, flushing.Token).ConfigureAwait(false);
+                        await store.AppendBuildLogAsync(payload.DeploymentId, SnapshotBuildLog(), flushing.Token)
+                            .ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // The build finished, and the caller writes the final copy.
+                }
+            },
+            CancellationToken.None);
 
         try
         {
@@ -159,7 +214,7 @@ public sealed class DeployHandler(
         }
         catch (InvalidOperationException ex)
         {
-            await store.AppendBuildLogAsync(payload.DeploymentId, buildLog.ToString(), ct).ConfigureAwait(false);
+            await store.AppendBuildLogAsync(payload.DeploymentId, SnapshotBuildLog(), ct).ConfigureAwait(false);
             await store.RecordDeploymentFailedAsync(
                 payload.DeploymentId, ErrorCodes.ApplicationBuildFailed, ex.Message, ct).ConfigureAwait(false);
 
@@ -167,7 +222,12 @@ public sealed class DeployHandler(
         }
         finally
         {
-            await store.AppendBuildLogAsync(payload.DeploymentId, buildLog.ToString(), ct).ConfigureAwait(false);
+            // Stopped before the final write, so the timer cannot race it and
+            // leave a partial snapshot as the stored log.
+            await flushing.CancelAsync().ConfigureAwait(false);
+            await flusher.ConfigureAwait(false);
+
+            await store.AppendBuildLogAsync(payload.DeploymentId, SnapshotBuildLog(), ct).ConfigureAwait(false);
         }
 
         await context.ReportProgressAsync(45, "Preparing the network", ct).ConfigureAwait(false);
