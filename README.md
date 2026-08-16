@@ -44,7 +44,7 @@ create the first administrator.
 
 | | |
 |---|---|
-| OS | Linux (x86-64). Airside manages a Linux host and will refuse to run elsewhere. |
+| OS | Linux, x86-64 or arm64. Airside manages a Linux host and will refuse to run elsewhere. |
 | Memory | 1 GB before any workload; 2 GB is a comfortable starting point. |
 | Ports | **80 and 443 open to the internet.** Port 80 is not optional — the ACME challenge uses it even for a site that only serves HTTPS. |
 | DNS | A domain with an A record pointing at the host, if you want real certificates. |
