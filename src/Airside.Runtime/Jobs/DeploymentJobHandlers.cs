@@ -15,6 +15,9 @@ public static class ApplicationJobTypes
     public const string Delete = "application.delete";
     public const string AttachDatabase = "application.attach_database";
     public const string DetachDatabase = "application.detach_database";
+    public const string Start = "application.start";
+    public const string Stop = "application.stop";
+    public const string Restart = "application.restart";
 }
 
 public sealed record DeployPayload(Guid WorkloadId, Guid DeploymentId);

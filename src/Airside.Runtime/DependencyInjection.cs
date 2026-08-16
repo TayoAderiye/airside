@@ -117,6 +117,15 @@ public static class DependencyInjection
 
         services.AddScoped<IJobHandler, DeployHandler>();
         services.AddScoped<IJobHandler, AttachmentHandler>();
+        // One handler class, three job types. Registering them separately keeps
+        // start, stop, and restart from drifting apart in behaviour.
+        services.AddScoped<IJobHandler>(sp => ActivatorUtilities.CreateInstance<ApplicationLifecycleHandler>(
+            sp, ApplicationJobTypes.Start, ApplicationState.Running));
+        services.AddScoped<IJobHandler>(sp => ActivatorUtilities.CreateInstance<ApplicationLifecycleHandler>(
+            sp, ApplicationJobTypes.Stop, ApplicationState.Stopped));
+        services.AddScoped<IJobHandler>(sp => ActivatorUtilities.CreateInstance<ApplicationLifecycleHandler>(
+            sp, ApplicationJobTypes.Restart, ApplicationState.Running));
+        services.AddScoped<IJobHandler, ApplicationDeleteHandler>();
         services.AddScoped<IJobHandler, BindDomainHandler>();
         services.AddScoped<IJobHandler, UnbindDomainHandler>();
         services.AddScoped<IJobHandler, DatabaseBackupHandler>();

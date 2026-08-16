@@ -22,6 +22,18 @@ public sealed record AddDomainRequest(
 /// </param>
 public sealed record UploadCertificateRequest(string CertificateChainPem, string PrivateKeyPem);
 
+/// <param name="ConfirmHostname">
+/// Typed back, because moving a hostname changes which site the public sees at
+/// that address.
+/// </param>
+public sealed record MoveDomainRequest(Guid TargetApplicationId, string ConfirmHostname);
+
+/// <param name="Redirect">
+/// <c>www_to_apex</c> or <c>apex_to_www</c>. Whichever is chosen, the other
+/// hostname is the one that actually serves the site.
+/// </param>
+public sealed record AddApexAndWwwRequest(string Hostname, string TlsMode, string Redirect = "www_to_apex");
+
 /// <param name="Preload">
 /// Requires typed confirmation, because submission to the browser preload list is
 /// effectively irreversible.

@@ -1,3 +1,4 @@
+using Airside.Core.Workloads;
 using Airside.Core.Domains;
 using System.Text.Json;
 using Airside.Core.Common;
@@ -376,5 +377,123 @@ internal sealed class ApplicationStore(
             attachment.AttachedAt = timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
+    }
+}
+
+/// <summary>
+/// Reads and writes for the application lifecycle and teardown paths.
+/// </summary>
+/// <remarks>
+/// Kept apart from <see cref="ApplicationStore"/> because deleting needs to
+/// gather everything Airside created <em>before</em> any of it is destroyed —
+/// once the container is gone, so is the only record of which network and volumes
+/// belonged to it.
+/// </remarks>
+internal sealed class ApplicationLifecycleStore(
+    AirsideDbContext db,
+    TimeProvider timeProvider) : IApplicationLifecycleStore
+{
+    public async Task<ApplicationTeardown?> GetTeardownAsync(Guid applicationId, CancellationToken ct)
+    {
+        var app = await db.Applications
+            .AsNoTracking()
+            .Include(a => a.Volumes)
+            .FirstOrDefaultAsync(a => a.Id == applicationId, ct)
+            .ConfigureAwait(false);
+
+        if (app is null || !Slug.TryCreate(app.Slug, out var slug))
+        {
+            return null;
+        }
+
+        var hostnames = await db.Domains
+            .AsNoTracking()
+            .Where(d => d.ApplicationId == applicationId)
+            .Select(d => d.Hostname)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var images = await db.Deployments
+            .AsNoTracking()
+            .Where(d => d.ApplicationId == applicationId && d.ImageDigest != null)
+            .Select(d => d.ImageDigest!)
+            .Distinct()
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        return new ApplicationTeardown(
+            app.Id,
+            slug,
+            app.ContainerId,
+            AirsideNames.ApplicationNetwork(slug),
+            hostnames,
+            [.. app.Volumes.Select(v => v.Name)],
+            images);
+    }
+
+    public async Task<string?> GetContainerIdAsync(Guid applicationId, CancellationToken ct) =>
+        await db.Applications
+            .AsNoTracking()
+            .Where(a => a.Id == applicationId)
+            .Select(a => a.ContainerId)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+    public async Task SetLifecycleStateAsync(Guid applicationId, string state, CancellationToken ct)
+    {
+        var app = await db.Applications.FirstOrDefaultAsync(a => a.Id == applicationId, ct).ConfigureAwait(false);
+
+        if (app is null)
+        {
+            return;
+        }
+
+        app.State = state;
+        app.StateChangedAt = timeProvider.GetUtcNow().UtcDateTime;
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task MarkDeletedAsync(Guid applicationId, CancellationToken ct)
+    {
+        var app = await db.Applications.FirstOrDefaultAsync(a => a.Id == applicationId, ct).ConfigureAwait(false);
+
+        if (app is null)
+        {
+            return;
+        }
+
+        app.State = nameof(ApplicationState.Deleted);
+        app.StateChangedAt = timeProvider.GetUtcNow().UtcDateTime;
+        app.DeletedAt = timeProvider.GetUtcNow().UtcDateTime;
+        app.ContainerId = null;
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Soft-deletes every domain on the application so the hostnames are free again.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a cascade from the application row. A domain is a
+    /// hostname somebody configured DNS for, and the delete has to be an explicit,
+    /// audited act rather than a side effect of a foreign key.
+    /// </remarks>
+    public async Task ReleaseDomainsAsync(Guid applicationId, CancellationToken ct)
+    {
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+
+        var domains = await db.Domains
+            .Where(d => d.ApplicationId == applicationId)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        foreach (var domain in domains)
+        {
+            domain.DetachedAt = now;
+            domain.DeletedAt = now;
+            domain.Status = DomainStatus.Detaching;
+        }
+
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }
