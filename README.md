@@ -119,8 +119,20 @@ sudo docker compose -f /opt/airside/docker-compose.yml ps
 sudo docker logs airside-api --tail 50
 ```
 
-The `airside` CLI on the host keeps working when the API does not — `airside
-status` reads the update state file directly.
+**Locked out after setting a dashboard domain?** Clearing it restores access on
+the host's address:
+
+```bash
+sudo touch /var/lib/airside/domain-reset && sudo docker restart airside-api
+```
+
+The API clears the dashboard domain at startup when that file exists, withdraws
+the route and restores the catch-all, so the box answers on its IP again through
+an SSH tunnel.
+
+> The `airside` CLI is designed to do this and more when the API cannot, but
+> `install.sh` does not yet put it on the host. Until it does, the file above is
+> the recovery path.
 
 ## Security model, in plain terms
 

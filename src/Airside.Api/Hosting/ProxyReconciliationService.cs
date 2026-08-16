@@ -141,6 +141,27 @@ public sealed class ProxyReconciliationService(
             }
             else
             {
+                // Reasserted, not assumed. The dashboard hostname lives in
+                // InstanceSettings rather than in Domains, so the loop above —
+                // which walks Domains — never sees it. A replaced proxy container
+                // came back with the empty route list from caddy.json, the
+                // fallback was withdrawn below because a domain exists, and the
+                // result was a Caddy serving nothing at all: an empty 200 on port
+                // 80 and a plain-HTTP listener on 443. The operator is locked out
+                // of the only interface that could fix it.
+                await proxy.UpsertRouteAsync(
+                    DashboardRoute.For(settings.DashboardDomain), ct).ConfigureAwait(false);
+
+                // The previous hostname keeps working until its grace period ends,
+                // so DNS has time to move without the old address dying first.
+                if (!string.IsNullOrEmpty(settings.PreviousDashboardDomain)
+                    && settings.PreviousDashboardDomainUntil is { } until
+                    && until > timeProvider.GetUtcNow().UtcDateTime)
+                {
+                    await proxy.UpsertRouteAsync(
+                        DashboardRoute.For(settings.PreviousDashboardDomain), ct).ConfigureAwait(false);
+                }
+
                 // Withdrawn once there is a real dashboard domain. Left in place it
                 // would keep serving the dashboard on the bare IP and on every
                 // other hostname pointed at this host.
