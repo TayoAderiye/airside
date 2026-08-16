@@ -10,7 +10,7 @@ import { AllocationRail } from '@/components/allocation-rail'
 import { EngineGlyph, engineLabel } from '@/components/engine'
 import { ProblemBanner } from '@/components/problem-banner'
 import { client } from '@/lib/api/client'
-import { coresToNanos, giBToBytes, memoryRail } from '@/lib/api/units'
+import { bytesToGiB, coresToNanos, giBToBytes, memoryRail, nanosToCores } from '@/lib/api/units'
 import type { components } from '@/lib/api/schema'
 import type { DatabaseEngine, MaxMemoryPolicy } from '@/lib/api/types'
 
@@ -56,7 +56,18 @@ export function DatabaseCreateForm() {
 
         const list = engineRes.data ?? []
         setEngines(list)
-        setHost(hostRes.data ?? null)
+
+        const h = hostRes.data ?? null
+        setHost(h)
+
+        // Brought inside what the host will admit. A slider whose value exceeds
+        // its own maximum renders pinned at the end and reads as a setting the
+        // operator chose, so the defaults have to move rather than the bounds.
+        if (h) {
+          setCpu((c) => Math.max(0.25, Math.min(c, nanosToCores(h.available.cpuNanos))))
+          setMemory((m) => Math.max(0.25, Math.min(m, bytesToGiB(h.available.memoryBytes))))
+          setStorage((s) => Math.max(1, Math.min(s, bytesToGiB(h.available.storageBytes))))
+        }
 
         const first = list.find((e) => e.kind === 'postgres') ?? list[0]
         if (first) {
@@ -88,6 +99,18 @@ export function DatabaseCreateForm() {
       return 'Lowercase letters, digits and hyphens; must start with a letter.'
     return null
   }, [name])
+
+  /**
+   * What the host will actually admit, in the form's own units.
+   *
+   * The sliders used to run to 8 cores and 32 GiB on any host, so on a 2 GB
+   * instance the obvious settings produced a 409 after submitting — the
+   * allocation rail showed the overshoot, but only to someone who read it.
+   * These cap the sliders instead.
+   */
+  const availableCores = host ? nanosToCores(host.available.cpuNanos) : 8
+  const availableMemory = host ? bytesToGiB(host.available.memoryBytes) : 32
+  const availableStorage = host ? bytesToGiB(host.available.storageBytes) : 500
 
   const caps = engine?.capabilities
   const needsDatabaseName = caps?.supportsDatabaseName ?? false
@@ -260,19 +283,47 @@ export function DatabaseCreateForm() {
           )}
         </Panel>
 
-        <Panel title="Resources" description="Limits are reserved from host capacity as soon as the database is created.">
+        <Panel
+          title="Resources"
+          description={
+            host
+              ? `Limits are reserved as soon as the database is created. This host has ${availableCores.toFixed(2)} cores, ${availableMemory.toFixed(2)} GiB and ${availableStorage.toFixed(1)} GiB left to give.`
+              : 'Limits are reserved from host capacity as soon as the database is created.'
+          }
+        >
           <Field label={`CPU — ${cpu} core${cpu === 1 ? '' : 's'}`} htmlFor="db-cpu">
-            <Slider id="db-cpu" min={0.5} max={8} step={0.5} value={cpu} onChange={setCpu} />
+            <Slider
+              id="db-cpu"
+              min={0.25}
+              max={Math.max(0.25, Math.min(8, availableCores))}
+              step={0.25}
+              value={cpu}
+              onChange={setCpu}
+            />
           </Field>
           <Field label={`Memory — ${memory} GiB`} htmlFor="db-mem">
-            <Slider id="db-mem" min={0.5} max={32} step={0.5} value={memory} onChange={setMemory} />
+            <Slider
+              id="db-mem"
+              min={0.25}
+              max={Math.max(0.25, Math.min(32, availableMemory))}
+              step={0.25}
+              value={memory}
+              onChange={setMemory}
+            />
           </Field>
           <Field
             label={`Storage — ${storage} GiB`}
             htmlFor="db-storage"
             hint={isRedis ? 'Redis keeps data in memory, but the append-only file is written here.' : undefined}
           >
-            <Slider id="db-storage" min={isRedis ? 1 : 5} max={500} step={isRedis ? 1 : 5} value={storage} onChange={setStorage} />
+            <Slider
+              id="db-storage"
+              min={1}
+              max={Math.max(1, Math.min(500, availableStorage))}
+              step={1}
+              value={storage}
+              onChange={setStorage}
+            />
           </Field>
         </Panel>
 

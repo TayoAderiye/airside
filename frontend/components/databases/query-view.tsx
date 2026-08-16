@@ -25,7 +25,12 @@ export function QueryView() {
     client
       .GET('/api/v1/databases')
       .then((r) => {
-        const items = r.data?.items ?? []
+        // The control-plane store is excluded, and not only because a query
+        // against it would 404 — its id is synthesised and belongs to no row.
+        // It holds every credential, session and audit entry on the host, and a
+        // console pointed at it is not a feature Airside should offer.
+        const items = (r.data?.items ?? []).filter((d) => !d.isSystem)
+
         setRows(items)
         setSelectedId((id) => id ?? items[0]?.id)
       })
