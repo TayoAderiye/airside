@@ -5,8 +5,10 @@
 Please report privately, not as a public issue.
 
 **Use [GitHub's private vulnerability reporting](https://github.com/TayoAderiye/airside/security/advisories/new)**
-on this repository. If that is unavailable to you, email **tayoriye@gmail.com**
-with `AIRSIDE SECURITY` in the subject.
+on this repository. It is enabled, so the form above is the whole process — the
+report stays private between you and the maintainers until there is a fix to
+publish, and it keeps the discussion attached to the code rather than in
+somebody's inbox.
 
 Useful to include: what you did, what happened, and what you expected. A minimal
 reproduction is worth more than a scanner report. If you have a suggested fix,
@@ -15,8 +17,9 @@ the diff discloses the problem before there is anything to upgrade to.
 
 This is a small project with no security team and no bounty programme. Expect an
 acknowledgement within a few days, and please allow reasonable time for a fix
-before disclosing. If you do not hear back within two weeks, chase — a missed
-mail is far more likely than a decision to ignore you.
+before disclosing. If you do not hear back within two weeks, chase by commenting
+on your own advisory — an overlooked notification is far more likely than a
+decision to ignore you.
 
 ## What is in scope
 
