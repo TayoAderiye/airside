@@ -44,10 +44,16 @@ public sealed record HostReserve(long CpuNanos, long MemoryBytes, long StorageBy
         // headroom for scheduling, not a permanent allocation.
         CpuNanos: Bounded(cpuNanos, 0.25, 200_000_000L, 1_000_000_000L),
 
-        // A quarter of memory, floor 384 MiB, ceiling 2 GiB. Measured against a
-        // real install: Postgres, the API, the dashboard and Caddy together sit
-        // comfortably under 800 MiB on a small host.
-        MemoryBytes: Bounded(memoryBytes, 0.25, 384L * 1024 * 1024, 2L * 1024 * 1024 * 1024),
+        // Two fifths of memory, floor 512 MiB, ceiling 2 GiB.
+        //
+        // Measured, not guessed. A freshly installed 2 GB host reports 0.7 GiB
+        // in use with nothing deployed — the OS plus Postgres, the API, the
+        // dashboard and Caddy. A quarter would have reserved 0.48 GiB, less than
+        // the control plane itself occupies, and the gate would then admit
+        // workloads that do not fit alongside it. This is the one dimension
+        // where the reserve has to cover a real, measurable floor rather than
+        // scheduling headroom.
+        MemoryBytes: Bounded(memoryBytes, 0.40, 512L * 1024 * 1024, 2L * 1024 * 1024 * 1024),
 
         // A fifth of the disk, floor 2 GiB, ceiling 20 GiB. The old fixed 10 GiB
         // exceeded the whole filesystem on an 8 GiB cloud image, which made

@@ -53,6 +53,23 @@ public class HostReserveTests
     }
 
     [Fact]
+    public void TheMemoryReserveCoversWhatTheControlPlaneActuallyUses()
+    {
+        // A freshly installed 2 GB host reports 0.7 GiB in use with nothing
+        // deployed — the OS plus Postgres, the API, the dashboard and Caddy.
+        // A reserve below that admits workloads which do not fit beside the
+        // control plane, and the host discovers it by running out of memory
+        // rather than by refusing anything.
+        const long ObservedControlPlaneUsage = 700L * 1024 * 1024;
+
+        var reserve = HostReserve.For(SmallCpu, SmallMemory, SmallStorage);
+
+        Assert.True(
+            reserve.MemoryBytes >= ObservedControlPlaneUsage,
+            $"reserve {reserve.MemoryBytes} is below the {ObservedControlPlaneUsage} the control plane occupies");
+    }
+
+    [Fact]
     public void TheStorageReserveNeverExceedsTheDisk()
     {
         // The old fixed 10 GiB was larger than the whole filesystem on an 8 GiB
