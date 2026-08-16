@@ -401,6 +401,44 @@ because that hostname lives in `InstanceSettings` rather than in `Domains`.
 
 ---
 
+## First install on a real host
+
+An EC2 box, Ubuntu 24.04, 2 GB, x86-64. Everything below was found by running
+it, and none of it was visible from macOS with Docker Desktop.
+
+- **The installer never fetched the compose files it then ran.** It created
+  `/opt/airside`, wrote `.env`, and ran `docker compose pull` in a directory
+  with no compose file. Every install would have stopped there.
+- **Both health checks called `wget`,** which the chiselled runtime image does
+  not contain — so the compose healthcheck could only fail, and the installer's
+  readiness loop ended every install with "the API did not become healthy" on a
+  host where the API was fine.
+- **The control plane did not own its own data directory.** Created by root, and
+  the API runs as a non-root user. Nothing noticed until the first login, because
+  Data Protection does not touch the key ring until the first thing is encrypted
+  — which is the session cookie. Install, migrate, seed, accept the setup token,
+  create the administrator, then `internal.unhandled` on a file permission.
+- **A fresh install served nothing.** Routes are only created when a domain is
+  bound, a new box has no dashboard domain, so Caddy listened on 80 and 443 and
+  matched nothing. The address the installer prints returned a blank page.
+
+Two of those had the same shape: the install *reported success* and the failure
+surfaced later, somewhere that did not name the cause. That is worth more
+attention than the individual bugs.
+
+Still open from that run, none of them blocking:
+
+- `Cannot load library libgssapi_krb5.so.2` at startup — Npgsql probing for
+  Kerberos, which the chiselled image does not ship. Harmless, and printed as a
+  bare `Error:` in the first lines an operator ever sees.
+- EF logs the first `__EFMigrationsHistory` probe at `Error` on a first run,
+  where the table is expected not to exist.
+- Six `PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning`
+  model warnings — a global query filter on the principal end of a required
+  relationship can silently drop rows.
+
+---
+
 ## Cross-cutting, held to in every phase
 
 - Both migrations generated in the same pull request; CI fails if either lags.
