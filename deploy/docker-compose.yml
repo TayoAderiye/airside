@@ -84,6 +84,17 @@ services:
 
   airside-proxy:
     image: caddy:2.8-alpine
+    # The Caddy binary carries file capabilities (cap_net_bind_service), and the
+    # kernel refuses to execve a file whose permitted capabilities are outside the
+    # bounding set — so a bare cap_drop: ALL does not produce a proxy that cannot
+    # bind low ports, it produces a container that never starts, with
+    # "exec /usr/bin/caddy: operation not permitted" and nothing from Caddy itself.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     container_name: airside-proxy
     restart: unless-stopped
     ports:
@@ -121,7 +132,15 @@ volumes:
     labels:
       airside.managed: "true"
       airside.system: "true"
+  # Caddy's certificates and its ACME account key. BACK THIS UP alongside the
+  # database and the key ring. Losing it makes Caddy request every certificate
+  # again at once, which trips Let's Encrypt's weekly limit part-way through and
+  # leaves some hostnames without a certificate for a week — a failure that looks
+  # like a broken install rather than a missing volume.
   airside-caddy-data:
     name: airside-caddy-data
+    labels:
+      airside.managed: "true"
+      airside.system: "true"
   airside-caddy-config:
     name: airside-caddy-config
