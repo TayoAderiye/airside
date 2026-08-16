@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Info, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,18 @@ import type { DatabaseEngine, MaxMemoryPolicy } from '@/lib/api/types'
 
 type Host = components['schemas']['HostDto']
 type Engine = components['schemas']['DatabaseEngineDto']
+
+/**
+ * The smallest database this form can express.
+ *
+ * Defined once because three things must agree: the slider minimum, the floor
+ * the defaults are clamped to, and the threshold deciding whether the host can
+ * admit anything at all. When they disagreed the floor won over the ceiling,
+ * and the form settled on a value the API always refused.
+ */
+const MIN_CORES = 0.25
+const MIN_MEMORY_GIB = 0.25
+const MIN_STORAGE_GIB = 1
 
 export function DatabaseCreateForm() {
   const router = useRouter()
@@ -64,9 +77,9 @@ export function DatabaseCreateForm() {
         // its own maximum renders pinned at the end and reads as a setting the
         // operator chose, so the defaults have to move rather than the bounds.
         if (h) {
-          setCpu((c) => Math.max(0.25, Math.min(c, nanosToCores(h.available.cpuNanos))))
-          setMemory((m) => Math.max(0.25, Math.min(m, bytesToGiB(h.available.memoryBytes))))
-          setStorage((s) => Math.max(1, Math.min(s, bytesToGiB(h.available.storageBytes))))
+          setCpu((c) => Math.max(MIN_CORES, Math.min(c, nanosToCores(h.available.cpuNanos))))
+          setMemory((m) => Math.max(MIN_MEMORY_GIB, Math.min(m, bytesToGiB(h.available.memoryBytes))))
+          setStorage((s) => Math.max(MIN_STORAGE_GIB, Math.min(s, bytesToGiB(h.available.storageBytes))))
         }
 
         const first = list.find((e) => e.kind === 'postgres') ?? list[0]
@@ -112,6 +125,33 @@ export function DatabaseCreateForm() {
   const availableMemory = host ? bytesToGiB(host.available.memoryBytes) : 32
   const availableStorage = host ? bytesToGiB(host.available.storageBytes) : 500
 
+  /**
+   * Whether this host can admit the smallest database the form can express.
+   *
+   * The clamps above apply a floor after taking the minimum, so on a host with
+   * less than a gibibyte free the storage slider settles on 1 GiB — its own
+   * minimum, and more than the host will give. Its maximum computes to 1 GiB
+   * too, so the control is pinned to a value the API refuses, and submitting
+   * returns a 409 that no amount of dragging can avoid. The form looked usable
+   * and could not succeed.
+   *
+   * Refusing up front is the honest version. The operator needs a bigger
+   * instance or a cleared disk, and neither is on this screen.
+   */
+  const shortfalls = host
+    ? [
+        availableCores < MIN_CORES
+          ? `${MIN_CORES} cores of CPU (${availableCores.toFixed(2)} free)`
+          : null,
+        availableMemory < MIN_MEMORY_GIB
+          ? `${MIN_MEMORY_GIB} GiB of memory (${availableMemory.toFixed(2)} free)`
+          : null,
+        availableStorage < MIN_STORAGE_GIB
+          ? `${MIN_STORAGE_GIB} GiB of storage (${availableStorage.toFixed(2)} free)`
+          : null,
+      ].filter((x): x is string => x !== null)
+    : []
+
   const caps = engine?.capabilities
   const needsDatabaseName = caps?.supportsDatabaseName ?? false
   const needsUsername = caps?.supportsUserAccounts ?? false
@@ -127,6 +167,7 @@ export function DatabaseCreateForm() {
   const effectiveDatabaseName = databaseName.trim() || suggestedDatabaseName
 
   const canSubmit =
+    shortfalls.length === 0 &&
     name.length > 1 &&
     !nameError &&
     !!engine &&
@@ -294,8 +335,8 @@ export function DatabaseCreateForm() {
           <Field label={`CPU — ${cpu} core${cpu === 1 ? '' : 's'}`} htmlFor="db-cpu">
             <Slider
               id="db-cpu"
-              min={0.25}
-              max={Math.max(0.25, Math.min(8, availableCores))}
+              min={MIN_CORES}
+              max={Math.max(MIN_CORES, Math.min(8, availableCores))}
               step={0.25}
               value={cpu}
               onChange={setCpu}
@@ -304,8 +345,8 @@ export function DatabaseCreateForm() {
           <Field label={`Memory — ${memory} GiB`} htmlFor="db-mem">
             <Slider
               id="db-mem"
-              min={0.25}
-              max={Math.max(0.25, Math.min(32, availableMemory))}
+              min={MIN_MEMORY_GIB}
+              max={Math.max(MIN_MEMORY_GIB, Math.min(32, availableMemory))}
               step={0.25}
               value={memory}
               onChange={setMemory}
@@ -318,8 +359,8 @@ export function DatabaseCreateForm() {
           >
             <Slider
               id="db-storage"
-              min={1}
-              max={Math.max(1, Math.min(500, availableStorage))}
+              min={MIN_STORAGE_GIB}
+              max={Math.max(MIN_STORAGE_GIB, Math.min(500, availableStorage))}
               step={1}
               value={storage}
               onChange={setStorage}
@@ -359,6 +400,22 @@ export function DatabaseCreateForm() {
               checked={aof}
               onChange={setAof}
             />
+          </Panel>
+        )}
+
+        {shortfalls.length > 0 && (
+          <Panel title="This host cannot fit another database">
+            <p className="text-sm text-muted-foreground">
+              The smallest database Airside can create still needs more than is left here. Short of{' '}
+              {shortfalls.join(', and ')}.
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Free space or move to a larger instance. Deleting a database releases its allocation
+              only if you also delete its volume — the volume is kept by default, and it still counts.
+            </p>
+            <Link href="/infrastructure/storage" className="mt-3 inline-block font-mono text-xs text-primary hover:underline">
+              Review volumes
+            </Link>
           </Panel>
         )}
 

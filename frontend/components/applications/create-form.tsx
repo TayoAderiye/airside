@@ -11,7 +11,7 @@ import { BackLink } from '@/components/ui/back-link'
 import { Button } from '@/components/ui/button'
 import { ProblemBanner } from '@/components/problem-banner'
 import { client } from '@/lib/api/client'
-import { coresToNanos, cpuRail, giBToBytes, memoryRail } from '@/lib/api/units'
+import { bytesToGiB, coresToNanos, cpuRail, giBToBytes, memoryRail, nanosToCores } from '@/lib/api/units'
 import type { components } from '@/lib/api/schema'
 import { cn } from '@/lib/utils'
 
@@ -30,6 +30,13 @@ const SOURCES = [
 ] as const
 
 type SourceKind = (typeof SOURCES)[number]['kind']
+
+/**
+ * The smallest application this form can express. See the database form for why
+ * these are named rather than repeated at each use.
+ */
+const MIN_CORES = 0.25
+const MIN_MEMORY_GIB = 0.5
 
 export function AppCreateForm() {
   const router = useRouter()
@@ -63,7 +70,19 @@ export function AppCreateForm() {
     client
       .GET('/api/v1/host')
       .then((res) => {
-        if (!cancelled) setHost(res.data ?? null)
+        if (cancelled) return
+
+        const h = res.data ?? null
+        setHost(h)
+
+        // Brought inside what the host will admit, the same way the database
+        // form does it. Without this the sliders ran to 4 cores and 8 GiB on
+        // every host, so the defaults on a 2 GB instance produced a 409 after
+        // submitting, with the overshoot visible only on the rail beside them.
+        if (h) {
+          setCpu((c) => Math.max(MIN_CORES, Math.min(c, nanosToCores(h.available.cpuNanos))))
+          setMemory((m) => Math.max(MIN_MEMORY_GIB, Math.min(m, bytesToGiB(h.available.memoryBytes))))
+        }
       })
       .catch(() => {
         // The rails are a nicety; a host that will not answer is the shell's
@@ -74,6 +93,26 @@ export function AppCreateForm() {
     }
   }, [])
 
+  const availableCores = host ? nanosToCores(host.available.cpuNanos) : 4
+  const availableMemory = host ? bytesToGiB(host.available.memoryBytes) : 8
+
+  /**
+   * Whether this host can admit the smallest application the form can express.
+   *
+   * Same reasoning as the database form: the clamp applies a floor after taking
+   * the minimum, so a host with less headroom than the floor leaves the control
+   * pinned to a value the API refuses. Saying so beats submitting into a 409
+   * that no adjustment on this screen can avoid.
+   */
+  const shortfalls = host
+    ? [
+        availableCores < MIN_CORES ? `${MIN_CORES} cores of CPU (${availableCores.toFixed(2)} free)` : null,
+        availableMemory < MIN_MEMORY_GIB
+          ? `${MIN_MEMORY_GIB} GiB of memory (${availableMemory.toFixed(2)} free)`
+          : null,
+      ].filter((x): x is string => x !== null)
+    : []
+
   const sourceValid =
     (source === 'git' && repo.trim()) ||
     (source === 'image' && image.trim()) ||
@@ -81,7 +120,13 @@ export function AppCreateForm() {
 
   const healthValid = healthKind === 'http' ? healthPath.trim().startsWith('/') : healthCommand.trim().length > 0
 
-  const canSubmit = name.trim().length > 1 && Boolean(sourceValid) && Number(port) > 0 && healthValid && !stage
+  const canSubmit =
+    shortfalls.length === 0 &&
+    name.trim().length > 1 &&
+    Boolean(sourceValid) &&
+    Number(port) > 0 &&
+    healthValid &&
+    !stage
 
   function updateEnv(i: number, patch: Partial<EnvVar>) {
     setEnv((prev) => prev.map((e, idx) => (idx === i ? { ...e, ...patch } : e)))
@@ -303,10 +348,24 @@ export function AppCreateForm() {
           <Panel title="Resources" description="Limits are reserved from host capacity as soon as the application is created.">
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <Field label={`CPU — ${cpu.toFixed(2)} cores`} htmlFor="cpu">
-                <Slider id="cpu" value={cpu} onChange={setCpu} min={0.25} max={4} step={0.25} />
+                <Slider
+                  id="cpu"
+                  value={cpu}
+                  onChange={setCpu}
+                  min={MIN_CORES}
+                  max={Math.max(MIN_CORES, Math.min(4, availableCores))}
+                  step={0.25}
+                />
               </Field>
               <Field label={`Memory — ${memory} GiB`} htmlFor="mem">
-                <Slider id="mem" value={memory} onChange={setMemory} min={0.5} max={8} step={0.5} />
+                <Slider
+                  id="mem"
+                  value={memory}
+                  onChange={setMemory}
+                  min={MIN_MEMORY_GIB}
+                  max={Math.max(MIN_MEMORY_GIB, Math.min(8, availableMemory))}
+                  step={0.5}
+                />
               </Field>
             </div>
           </Panel>
@@ -400,7 +459,9 @@ export function AppCreateForm() {
           </Button>
           {!canSubmit && !stage && (
             <p className="text-center text-xs text-muted-foreground">
-              Name, source, port and health check are required.
+              {shortfalls.length > 0
+                ? `This host cannot fit another workload — short of ${shortfalls.join(', and ')}. Free space or move to a larger instance.`
+                : 'Name, source, port and health check are required.'}
             </p>
           )}
         </aside>
