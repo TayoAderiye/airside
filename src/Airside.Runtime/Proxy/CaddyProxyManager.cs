@@ -83,8 +83,55 @@ public sealed class CaddyProxyManager(
 
         response.Dispose();
 
-        // No such id yet: append it. Appending is the only case where the route
-        // did not previously exist, so there is no window to protect.
+        // No such id yet: insert it at the front rather than appending. Caddy
+        // evaluates routes in array order, and the fallback route is a matcher-less
+        // catch-all that must stay last or it answers for every hostname. Every
+        // real route going to index 0 keeps it there without anything having to
+        // reorder anything.
+        //
+        // Order among real routes does not matter: each matches one host and is
+        // terminal, so no two can contend.
+        using var insert = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/config/apps/http/servers/{_options.ServerName}/routes/0")
+        {
+            Content = JsonContent.Create(payload, options: Json),
+        };
+
+        using var inserted = await http.SendAsync(insert, ct).ConfigureAwait(false);
+
+        if (!inserted.IsSuccessStatusCode)
+        {
+            var body = await inserted.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            throw new ProxyUnavailableException(
+                $"Caddy rejected the route for {route.Hostname}: {inserted.StatusCode} {Trim(body)}");
+        }
+
+        logger.LogInformation("Added proxy route for {Hostname}", route.Hostname);
+    }
+
+    /// <summary>The id of the catch-all route. Fixed, because only one may exist.</summary>
+    public const string FallbackRouteId = RouteIdPrefix + "fallback";
+
+    public async Task EnsureFallbackRouteAsync(RouteSpec route, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(route);
+
+        var payload = BuildRoute(FallbackRouteId, route with { Hostname = string.Empty });
+
+        using var patch = new HttpRequestMessage(HttpMethod.Patch, $"/id/{FallbackRouteId}")
+        {
+            Content = JsonContent.Create(payload, options: Json),
+        };
+
+        using var response = await http.SendAsync(patch, ct).ConfigureAwait(false);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        // Appended, unlike every other route, precisely so it lands last.
         using var append = await http.PostAsJsonAsync(
             $"/config/apps/http/servers/{_options.ServerName}/routes",
             payload,
@@ -95,10 +142,24 @@ public sealed class CaddyProxyManager(
         {
             var body = await append.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             throw new ProxyUnavailableException(
-                $"Caddy rejected the route for {route.Hostname}: {append.StatusCode} {Trim(body)}");
+                $"Caddy rejected the fallback route: {append.StatusCode} {Trim(body)}");
         }
 
-        logger.LogInformation("Added proxy route for {Hostname}", route.Hostname);
+        logger.LogInformation(
+            "Installed the fallback route; the dashboard answers on any hostname until a dashboard domain is set");
+    }
+
+    public async Task RemoveFallbackRouteAsync(CancellationToken ct)
+    {
+        using var response = await http
+            .DeleteAsync(new Uri($"/id/{FallbackRouteId}", UriKind.Relative), ct)
+            .ConfigureAwait(false);
+
+        // A missing fallback is the desired end state, so a 404 is a success.
+        if (response.IsSuccessStatusCode)
+        {
+            logger.LogInformation("Withdrew the fallback route");
+        }
     }
 
     public Task SwapUpstreamAsync(string hostname, UpstreamTarget upstream, CancellationToken ct) =>
@@ -286,7 +347,12 @@ public sealed class CaddyProxyManager(
         return new CaddyRoute
         {
             Id = id,
-            Match = [new CaddyMatch { Host = [route.Hostname] }],
+
+            // No hostname means no matcher at all, which is what makes the
+            // fallback route match everything. Every other route names its host.
+            Match = string.IsNullOrEmpty(route.Hostname)
+                ? null
+                : [new CaddyMatch { Host = [route.Hostname] }],
             Handle = handlers,
 
             // Terminal stops Caddy evaluating later routes once this host matches,

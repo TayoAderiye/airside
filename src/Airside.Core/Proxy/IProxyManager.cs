@@ -26,6 +26,27 @@ public interface IProxyManager
     Task UpsertRouteAsync(RouteSpec route, CancellationToken ct);
 
     /// <summary>
+    /// Installs a route that answers any hostname at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A freshly installed box has no dashboard domain, and therefore no route —
+    /// so the proxy listens on 80 and 443 and matches nothing, and the address the
+    /// installer prints serves a blank page. This is the route that makes a new
+    /// install reachable on its bare IP, before anyone has pointed DNS at it.
+    /// </para>
+    /// <para>
+    /// It is withdrawn once a dashboard domain exists. Leaving it would mean the
+    /// dashboard answers on every hostname that resolves to this host, including
+    /// the raw address, which is more surface than an operator asked for.
+    /// </para>
+    /// </remarks>
+    Task EnsureFallbackRouteAsync(RouteSpec route, CancellationToken ct);
+
+    /// <summary>Withdraws the fallback route. Succeeds when there is none.</summary>
+    Task RemoveFallbackRouteAsync(CancellationToken ct);
+
+    /// <summary>
     /// Points an existing route at a new upstream. This is the zero-downtime
     /// cutover, and the reason rollback is a proxy change plus a container start
     /// rather than a rebuild.

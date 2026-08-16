@@ -131,6 +131,68 @@ public class DashboardRouteTests
         Assert.Equal(DashboardRoute.UiPort, route.Upstream.Port);
     }
 
+
+    [Fact]
+    public async Task TheFallbackRouteCarriesNoHostMatcherAtAll()
+    {
+        // No matcher is what makes it answer on a bare IP, which is the only
+        // address a freshly installed box has. A host matcher of any kind here
+        // would leave the install serving a blank page — Caddy listening on 80
+        // and matching nothing.
+        var (proxy, handler) = Build();
+
+        await proxy.EnsureFallbackRouteAsync(DashboardRoute.For(string.Empty), CancellationToken.None);
+
+        using var body = JsonDocument.Parse(handler.Requests[0].Body!);
+        var root = body.RootElement;
+
+        Assert.False(root.TryGetProperty("match", out _));
+        Assert.Equal(CaddyProxyManager.FallbackRouteId, root.GetProperty("@id").GetString());
+    }
+
+    [Fact]
+    public async Task TheFallbackStillSplitsApiTrafficFromTheDashboard()
+    {
+        var (proxy, handler) = Build();
+
+        await proxy.EnsureFallbackRouteAsync(DashboardRoute.For(string.Empty), CancellationToken.None);
+
+        var nested = JsonDocument.Parse(handler.Requests[0].Body!)
+            .RootElement.GetProperty("handle")[0].GetProperty("routes");
+
+        Assert.Equal(
+            $"{AirsideLabels.SystemContainers.Api}:{DashboardRoute.ApiPort}",
+            nested[0].GetProperty("handle")[0].GetProperty("upstreams")[0].GetProperty("dial").GetString());
+        Assert.Equal(
+            $"{AirsideLabels.SystemContainers.Ui}:{DashboardRoute.UiPort}",
+            nested[1].GetProperty("handle")[0].GetProperty("upstreams")[0].GetProperty("dial").GetString());
+    }
+
+    [Fact]
+    public async Task RealRoutesAreInsertedAtTheFrontSoTheFallbackStaysLast()
+    {
+        // Caddy evaluates routes in array order. The fallback matches everything,
+        // so anything appended after it is dead — an application domain bound
+        // later would never be reached, and its traffic would silently arrive at
+        // the dashboard instead.
+        var handler = new RecordingHandler(
+            (HttpStatusCode.InternalServerError, "unknown object id"),
+            (HttpStatusCode.OK, "{}"));
+
+        var client = new HttpClient(handler) { BaseAddress = new Uri("http://airside-proxy:2019") };
+        var proxy = new CaddyProxyManager(
+            client, Options.Create(new CaddyOptions()), NullLogger<CaddyProxyManager>.Instance);
+
+        await proxy.UpsertRouteAsync(
+            new RouteSpec("app.example.com", new UpstreamTarget("airside-app-web-abc", 8080)),
+            CancellationToken.None);
+
+        var write = handler.Requests[1];
+
+        Assert.Equal(HttpMethod.Put, write.Method);
+        Assert.EndsWith("/routes/0", write.Path, StringComparison.Ordinal);
+    }
+
     private static (CaddyProxyManager Proxy, RecordingHandler Handler) BuildLister(string body)
     {
         var handler = new RecordingHandler((HttpStatusCode.OK, body));

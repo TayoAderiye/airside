@@ -86,6 +86,10 @@ public class DomainUnbindTests
 
         public Task UpsertRouteAsync(RouteSpec spec, CancellationToken ct) => Task.CompletedTask;
 
+        public Task EnsureFallbackRouteAsync(RouteSpec spec, CancellationToken ct) => Task.CompletedTask;
+
+        public Task RemoveFallbackRouteAsync(CancellationToken ct) => Task.CompletedTask;
+
         public Task SwapUpstreamAsync(string hostname, UpstreamTarget upstream, CancellationToken ct) =>
             Task.CompletedTask;
 

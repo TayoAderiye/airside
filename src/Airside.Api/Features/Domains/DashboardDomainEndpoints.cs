@@ -163,6 +163,12 @@ internal static class DashboardDomainEndpoints
         // working while DNS propagates.
         await proxy.UpsertRouteAsync(DashboardRoute.For(hostname), ct).ConfigureAwait(false);
 
+        // Withdrawn now rather than at the next reconciliation pass. Until it goes
+        // the dashboard also answers on the bare IP and on any other hostname
+        // pointed at this host, which is exactly the exposure setting a dashboard
+        // domain is meant to close.
+        await proxy.RemoveFallbackRouteAsync(ct).ConfigureAwait(false);
+
         await audit.WriteAsync(new AuditEntry
         {
             Action = "settings.dashboard_domain_changed",

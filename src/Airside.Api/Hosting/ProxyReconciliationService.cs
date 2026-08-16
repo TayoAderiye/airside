@@ -2,8 +2,10 @@ using Airside.Core.Containers;
 using Airside.Core.Domains;
 using Airside.Core.Naming;
 using Airside.Core.Proxy;
+using Airside.Data;
 using Airside.Runtime.Jobs;
 using Airside.Runtime.Proxy;
+using Microsoft.EntityFrameworkCore;
 
 namespace Airside.Api.Hosting;
 
@@ -119,6 +121,30 @@ public sealed class ProxyReconciliationService(
                 logger.LogInformation(
                     "Reconciled the proxy route for {Hostname} to {Upstream}",
                     domain.Hostname, upstream.ContainerName);
+            }
+
+            // The fallback route, which is what makes a freshly installed box
+            // reachable at all. Reconciled rather than installed once, because the
+            // proxy container comes back with only what caddy.json gave it — and
+            // an operator whose proxy restarted would otherwise find the dashboard
+            // silently unreachable with nothing in any log to say why.
+            var settings = await scope.ServiceProvider
+                .GetRequiredService<AirsideDbContext>()
+                .InstanceSettings.AsNoTracking()
+                .FirstAsync(ct)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrEmpty(settings.DashboardDomain))
+            {
+                await proxy.EnsureFallbackRouteAsync(
+                    DashboardRoute.For(string.Empty), ct).ConfigureAwait(false);
+            }
+            else
+            {
+                // Withdrawn once there is a real dashboard domain. Left in place it
+                // would keep serving the dashboard on the bare IP and on every
+                // other hostname pointed at this host.
+                await proxy.RemoveFallbackRouteAsync(ct).ConfigureAwait(false);
             }
 
             // The policy has to match the set of non-Automatic domains exactly. A

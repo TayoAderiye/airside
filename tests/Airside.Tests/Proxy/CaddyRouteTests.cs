@@ -60,8 +60,16 @@ public class CaddyRouteTests
     }
 
     [Fact]
-    public async Task UpsertAppendsWhenNoRouteExistsYet()
+    public async Task UpsertInsertsAtTheFrontWhenNoRouteExistsYet()
     {
+        // Inserted at index 0, not appended. The fallback route that makes a
+        // domainless install reachable is a matcher-less catch-all sitting at the
+        // end of the array, and Caddy evaluates in order — so anything appended
+        // after it would never be reached, and an application's traffic would
+        // silently arrive at the dashboard instead.
+        //
+        // Order among real routes is irrelevant: each matches one host and is
+        // terminal, so no two can contend.
         var (proxy, handler) = Build(
             (HttpStatusCode.InternalServerError, "unknown object id"),
             (HttpStatusCode.OK, "{}"));
@@ -71,8 +79,8 @@ public class CaddyRouteTests
             CancellationToken.None);
 
         Assert.Equal(2, handler.Requests.Count);
-        Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
-        Assert.Equal("/config/apps/http/servers/airside/routes", handler.Requests[1].Path);
+        Assert.Equal(HttpMethod.Put, handler.Requests[1].Method);
+        Assert.Equal("/config/apps/http/servers/airside/routes/0", handler.Requests[1].Path);
     }
 
     [Fact]
