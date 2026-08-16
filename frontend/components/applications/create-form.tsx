@@ -1,64 +1,171 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { GitBranch, Container, FileCode, Layers, Plus, Trash2 } from 'lucide-react'
-import type { AppSourceKind } from '@/lib/api/types'
-import { hostHealth } from '@/lib/api/mock'
+import { GitBranch, Container, FileCode, Loader2, Plus, Trash2 } from 'lucide-react'
+
 import { Panel, PageHeader } from '@/components/ui/panel'
-import { Field, TextInput, Textarea, NativeSelect, Slider, Hint } from '@/components/ui/field'
+import { Field, TextInput, NativeSelect, Slider, Hint } from '@/components/ui/field'
 import { AllocationRail } from '@/components/allocation-rail'
 import { BackLink } from '@/components/ui/back-link'
 import { Button } from '@/components/ui/button'
+import { ProblemBanner } from '@/components/problem-banner'
+import { client } from '@/lib/api/client'
+import { coresToNanos, cpuRail, giBToBytes, memoryRail } from '@/lib/api/units'
+import type { components } from '@/lib/api/schema'
 import { cn } from '@/lib/utils'
 
+type Host = components['schemas']['HostDto']
 type EnvVar = { key: string; value: string; secret: boolean }
 
-const SOURCES: { kind: AppSourceKind; label: string; icon: typeof GitBranch; blurb: string }[] = [
-  { kind: 'git', label: 'Git repository', icon: GitBranch, blurb: 'Build from a branch on push' },
+/**
+ * Three, not four. The API's SourceKind is image, git, or dockerfile, and its
+ * own comment says compose is out of scope — offering it here produced a form
+ * that could only ever be rejected.
+ */
+const SOURCES = [
+  { kind: 'git', label: 'Git repository', icon: GitBranch, blurb: 'Build from a branch' },
   { kind: 'image', label: 'Container image', icon: Container, blurb: 'Deploy a prebuilt image by tag' },
   { kind: 'dockerfile', label: 'Dockerfile', icon: FileCode, blurb: 'Build from an in-repo Dockerfile' },
-  { kind: 'compose', label: 'Compose', icon: Layers, blurb: 'Multi-service compose stack' },
-]
+] as const
+
+type SourceKind = (typeof SOURCES)[number]['kind']
 
 export function AppCreateForm() {
   const router = useRouter()
-  const [source, setSource] = useState<AppSourceKind>('git')
+
+  const [host, setHost] = useState<Host | null>(null)
+  const [source, setSource] = useState<SourceKind>('image')
   const [name, setName] = useState('')
   const [repo, setRepo] = useState('')
   const [branch, setBranch] = useState('main')
   const [image, setImage] = useState('')
   const [dockerfilePath, setDockerfilePath] = useState('Dockerfile')
-  const [composePath, setComposePath] = useState('docker-compose.yml')
-  const [port, setPort] = useState('3000')
-  const [replicas, setReplicas] = useState(2)
+  const [port, setPort] = useState('8080')
+
+  // Required by the API, with no "none" option, because zero-downtime cutover
+  // is start-new / poll-health / swap / stop-old. Without a health check that
+  // degrades to waiting a few seconds and hoping.
+  const [healthKind, setHealthKind] = useState<'http' | 'command'>('http')
+  const [healthPath, setHealthPath] = useState('/health')
+  const [healthStatus, setHealthStatus] = useState('200')
+  const [healthCommand, setHealthCommand] = useState('')
+
   const [cpu, setCpu] = useState(0.5)
   const [memory, setMemory] = useState(1)
   const [env, setEnv] = useState<EnvVar[]>([{ key: '', value: '', secret: false }])
-  const [submitting, setSubmitting] = useState(false)
 
-  // Aggregate request = per-replica limit × replicas. This is the allocation
-  // that actually gets promised to the scheduler, so preview it that way.
-  const cpuReq = cpu * replicas
-  const memReq = memory * replicas
+  const [error, setError] = useState<unknown>(null)
+  const [stage, setStage] = useState<string | null>(null)
 
-  const cpuTriple = useMemo(() => hostHealth.cpu, [])
+  useEffect(() => {
+    let cancelled = false
+    client
+      .GET('/api/v1/host')
+      .then((res) => {
+        if (!cancelled) setHost(res.data ?? null)
+      })
+      .catch(() => {
+        // The rails are a nicety; a host that will not answer is the shell's
+        // problem to report, not this form's.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const sourceValid =
     (source === 'git' && repo.trim()) ||
     (source === 'image' && image.trim()) ||
-    source === 'dockerfile' ||
-    source === 'compose'
-  const canSubmit = name.trim().length > 1 && Boolean(sourceValid) && Number(port) > 0
+    (source === 'dockerfile' && repo.trim())
+
+  const healthValid = healthKind === 'http' ? healthPath.trim().startsWith('/') : healthCommand.trim().length > 0
+
+  const canSubmit = name.trim().length > 1 && Boolean(sourceValid) && Number(port) > 0 && healthValid && !stage
 
   function updateEnv(i: number, patch: Partial<EnvVar>) {
     setEnv((prev) => prev.map((e, idx) => (idx === i ? { ...e, ...patch } : e)))
   }
 
-  function submit() {
-    setSubmitting(true)
-    const params = new URLSearchParams({ name, kind: 'app.deploy' })
-    setTimeout(() => router.push(`/applications/new/deploying?${params.toString()}`), 400)
+  async function submit() {
+    if (!canSubmit) return
+    setError(null)
+
+    try {
+      // Three calls, because the API separates them. Creating an application is
+      // synchronous and returns the application; deploying it is the job. The
+      // screen this replaced conflated the two and did neither.
+      setStage('Creating the application…')
+
+      const created = await client.POST('/api/v1/applications', {
+        body: {
+          slug: name,
+          displayName: name,
+          cpuNanos: coresToNanos(cpu),
+          memoryBytes: giBToBytes(memory),
+          containerPort: Number(port),
+          sourceKind: source,
+          ...(source === 'image' ? { imageRef: image } : {}),
+          ...(source === 'git' ? { gitRepositoryUrl: repo, gitBranch: branch } : {}),
+          ...(source === 'dockerfile' ? { gitRepositoryUrl: repo, gitBranch: branch, dockerfilePath } : {}),
+          // Every field named, including the nulls. The generated type requires
+          // them, and being explicit about "no command" beats relying on an
+          // omission to mean the same thing.
+          healthCheck: {
+            kind: healthKind,
+            path: healthKind === 'http' ? healthPath : null,
+            expectedStatus: healthKind === 'http' ? Number(healthStatus) || 200 : null,
+
+            // An argument vector, never a command line — there is no shell.
+            command: healthKind === 'command' ? healthCommand.trim().split(/\s+/) : null,
+            intervalSeconds: 10,
+            timeoutSeconds: 5,
+            retries: 3,
+          },
+        },
+      })
+
+      const appId = created.data?.id
+      if (!appId) throw new Error('The application was created without an id.')
+
+      const pairs = env.filter((e) => e.key.trim())
+
+      if (pairs.length > 0) {
+        setStage('Setting environment variables…')
+
+        // One call each: the API keys environment by name so it can audit a
+        // single variable changing, which a bulk replace could not.
+        for (const pair of pairs) {
+          await client.PUT('/api/v1/applications/{id}/environment/{key}', {
+            params: { path: { id: appId, key: pair.key } },
+            body: { value: pair.value, isSecret: pair.secret },
+          })
+        }
+      }
+
+      setStage('Starting the deployment…')
+
+      const deployed = await client.POST('/api/v1/applications/{id}/deployments', {
+        params: { path: { id: appId } },
+        body: {
+          branch: source === 'image' ? null : branch,
+          commitSha: null,
+          imageRef: source === 'image' ? image : null,
+        },
+      })
+
+      if (deployed.data?.jobId) {
+        router.push(`/applications/new/deploying?job=${deployed.data.jobId}&app=${appId}`)
+        return
+      }
+
+      // Created but not deploying: the application exists and saying so is
+      // better than implying nothing happened.
+      router.push(`/applications/${appId}`)
+    } catch (err) {
+      setError(err)
+      setStage(null)
+    }
   }
 
   return (
@@ -68,9 +175,8 @@ export function AppCreateForm() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-5">
-          {/* Source — the fields below adapt to this choice */}
           <Panel title="Source" description="Where this application's code or image comes from.">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {SOURCES.map((s) => {
                 const Icon = s.icon
                 const active = source === s.kind
@@ -96,21 +202,6 @@ export function AppCreateForm() {
             </div>
 
             <div className="mt-4 flex flex-col gap-4">
-              {source === 'git' && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_160px]">
-                  <Field label="Repository" htmlFor="repo" required hint="owner/name or full clone URL">
-                    <TextInput
-                      id="repo"
-                      value={repo}
-                      onChange={(e) => setRepo(e.target.value)}
-                      placeholder="acme/api-gateway"
-                    />
-                  </Field>
-                  <Field label="Branch" htmlFor="branch">
-                    <TextInput id="branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
-                  </Field>
-                </div>
-              )}
               {source === 'image' && (
                 <Field label="Image reference" htmlFor="image" required hint="registry/image:tag">
                   <TextInput
@@ -121,30 +212,29 @@ export function AppCreateForm() {
                   />
                 </Field>
               )}
-              {source === 'dockerfile' && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Repository" htmlFor="repo2" required>
+              {(source === 'git' || source === 'dockerfile') && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_160px]">
+                  <Field label="Repository" htmlFor="repo" required hint="Full clone URL">
                     <TextInput
-                      id="repo2"
+                      id="repo"
                       value={repo}
                       onChange={(e) => setRepo(e.target.value)}
-                      placeholder="acme/web"
+                      placeholder="https://github.com/acme/api-gateway.git"
                     />
                   </Field>
-                  <Field label="Dockerfile path" htmlFor="df">
-                    <TextInput id="df" value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} />
+                  <Field label="Branch" htmlFor="branch">
+                    <TextInput id="branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
                   </Field>
                 </div>
               )}
-              {source === 'compose' && (
-                <Field label="Compose file path" htmlFor="compose" hint="Relative to the repository root.">
-                  <TextInput id="compose" value={composePath} onChange={(e) => setComposePath(e.target.value)} />
+              {source === 'dockerfile' && (
+                <Field label="Dockerfile path" htmlFor="df" hint="Relative to the repository root.">
+                  <TextInput id="df" value={dockerfilePath} onChange={(e) => setDockerfilePath(e.target.value)} />
                 </Field>
               )}
             </div>
           </Panel>
 
-          {/* Identity + networking */}
           <Panel title="Identity & networking">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Application name" htmlFor="name" required hint="Lowercase, used for the internal DNS name.">
@@ -161,35 +251,69 @@ export function AppCreateForm() {
                   inputMode="numeric"
                   value={port}
                   onChange={(e) => setPort(e.target.value.replace(/[^0-9]/g, ''))}
-                  placeholder="3000"
+                  placeholder="8080"
                 />
               </Field>
             </div>
           </Panel>
 
-          {/* Resources — per replica, ganged with replica count */}
-          <Panel title="Resources" description="Limits are per replica. Total request is limit × replica count.">
-            <div className="flex flex-col gap-5">
-              <Field label={`Replicas — ${replicas}`} htmlFor="replicas">
-                <Slider id="replicas" value={replicas} onChange={setReplicas} min={1} max={8} step={1} />
-              </Field>
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Field label={`CPU per replica — ${cpu.toFixed(2)} cores`} htmlFor="cpu">
-                  <Slider id="cpu" value={cpu} onChange={setCpu} min={0.25} max={4} step={0.25} />
-                  <Hint>Total request: {cpuReq.toFixed(2)} cores</Hint>
+          <Panel
+            title="Health check"
+            description="Required. The new container has to pass this before traffic moves and the old one stops."
+          >
+            <Field label="Kind" htmlFor="health-kind">
+              <NativeSelect
+                id="health-kind"
+                value={healthKind}
+                onChange={(e) => setHealthKind(e.target.value as 'http' | 'command')}
+              >
+                <option value="http">HTTP — request a path and check the status</option>
+                <option value="command">Command — run it in the container, exit 0 is healthy</option>
+              </NativeSelect>
+            </Field>
+
+            {healthKind === 'http' ? (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_160px]">
+                <Field label="Path" htmlFor="health-path" required>
+                  <TextInput id="health-path" value={healthPath} onChange={(e) => setHealthPath(e.target.value)} />
                 </Field>
-                <Field label={`Memory per replica — ${memory} GiB`} htmlFor="mem">
-                  <Slider id="mem" value={memory} onChange={setMemory} min={0.5} max={8} step={0.5} />
-                  <Hint>Total request: {memReq} GiB</Hint>
+                <Field label="Expected status" htmlFor="health-status">
+                  <TextInput
+                    id="health-status"
+                    inputMode="numeric"
+                    value={healthStatus}
+                    onChange={(e) => setHealthStatus(e.target.value.replace(/[^0-9]/g, ''))}
+                  />
                 </Field>
               </div>
+            ) : (
+              <Field label="Command" htmlFor="health-cmd" required>
+                <TextInput
+                  id="health-cmd"
+                  value={healthCommand}
+                  onChange={(e) => setHealthCommand(e.target.value)}
+                  placeholder="pg_isready -U app"
+                  className="font-mono"
+                />
+                <Hint>Split on spaces into an argument vector. There is no shell, so pipes and redirection will not work.</Hint>
+              </Field>
+            )}
+          </Panel>
+
+          <Panel title="Resources" description="Limits are reserved from host capacity as soon as the application is created.">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+              <Field label={`CPU — ${cpu.toFixed(2)} cores`} htmlFor="cpu">
+                <Slider id="cpu" value={cpu} onChange={setCpu} min={0.25} max={4} step={0.25} />
+              </Field>
+              <Field label={`Memory — ${memory} GiB`} htmlFor="mem">
+                <Slider id="mem" value={memory} onChange={setMemory} min={0.5} max={8} step={0.5} />
+              </Field>
             </div>
           </Panel>
 
-          {/* Environment variables */}
           <Panel
             title="Environment"
-            description="Injected at container start. Mark sensitive values as secret."
+            description="Injected at container start. Secrets are encrypted at rest and masked in every response."
             actions={
               <Button
                 variant="outline"
@@ -244,21 +368,40 @@ export function AppCreateForm() {
               ))}
             </div>
           </Panel>
+
+          {error != null && <ProblemBanner error={error} />}
         </div>
 
-        {/* Live host-impact sidebar */}
         <aside className="flex flex-col gap-4 lg:sticky lg:top-4 lg:self-start">
-          <Panel title="Host impact" description="Where this workload's total request lands on the host.">
-            <div className="flex flex-col gap-4">
-              <AllocationRail label="CPU" triple={cpuTriple} requested={cpuReq} />
-              <AllocationRail label="Memory" triple={hostHealth.memory} requested={memReq} />
-            </div>
-          </Panel>
-          <Button className="w-full" disabled={!canSubmit || submitting} onClick={submit}>
-            {submitting ? 'Scheduling…' : 'Deploy application'}
+          {host && (
+            <Panel title="Host impact" description="Where this workload's request lands on the host.">
+              <div className="flex flex-col gap-4">
+                <AllocationRail
+                  label="CPU"
+                  triple={cpuRail(host.capacity, host.allocated, host.used)}
+                  requested={cpuRail(host.capacity, host.allocated, host.used).allocated + cpu}
+                />
+                <AllocationRail
+                  label="Memory"
+                  triple={memoryRail(host.capacity, host.allocated, host.used)}
+                  requested={memoryRail(host.capacity, host.allocated, host.used).allocated + memory}
+                />
+              </div>
+            </Panel>
+          )}
+          <Button className="w-full" disabled={!canSubmit} onClick={submit}>
+            {stage ? (
+              <>
+                <Loader2 className="size-3.5 animate-spin" /> {stage}
+              </>
+            ) : (
+              'Deploy application'
+            )}
           </Button>
-          {!canSubmit && (
-            <p className="text-center text-xs text-muted-foreground">Name, source, and port are required.</p>
+          {!canSubmit && !stage && (
+            <p className="text-center text-xs text-muted-foreground">
+              Name, source, port and health check are required.
+            </p>
           )}
         </aside>
       </div>

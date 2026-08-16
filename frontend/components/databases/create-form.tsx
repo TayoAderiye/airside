@@ -1,54 +1,78 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Info } from 'lucide-react'
+import { Info, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Field, TextInput, NativeSelect, Toggle, Slider, Hint } from '@/components/ui/field'
 import { Panel } from '@/components/ui/panel'
 import { AllocationRail } from '@/components/allocation-rail'
 import { EngineGlyph, engineLabel } from '@/components/engine'
-import { hostHealth } from '@/lib/api/mock'
+import { ProblemBanner } from '@/components/problem-banner'
+import { client } from '@/lib/api/client'
+import { coresToNanos, giBToBytes, memoryRail } from '@/lib/api/units'
+import type { components } from '@/lib/api/schema'
 import type { DatabaseEngine, MaxMemoryPolicy } from '@/lib/api/types'
 
-const ENGINES: DatabaseEngine[] = ['postgres', 'mysql', 'mongodb', 'redis']
-
-const VERSIONS: Record<DatabaseEngine, string[]> = {
-  postgres: ['16', '15', '14'],
-  mysql: ['8.4', '8.0'],
-  mongodb: ['7.0', '6.0'],
-  redis: ['7.4', '7.2'],
-}
-
-const POLICIES: { value: MaxMemoryPolicy; label: string }[] = [
-  { value: 'noeviction', label: 'noeviction — reject writes when full' },
-  { value: 'allkeys-lru', label: 'allkeys-lru — evict least-recently-used' },
-  { value: 'allkeys-lfu', label: 'allkeys-lfu — evict least-frequently-used' },
-  { value: 'volatile-lru', label: 'volatile-lru — LRU among keys with TTL' },
-  { value: 'volatile-ttl', label: 'volatile-ttl — shortest TTL first' },
-  { value: 'allkeys-random', label: 'allkeys-random' },
-]
+type Host = components['schemas']['HostDto']
+type Engine = components['schemas']['DatabaseEngineDto']
 
 export function DatabaseCreateForm() {
   const router = useRouter()
-  const [engine, setEngine] = useState<DatabaseEngine>('postgres')
+
+  // The engine catalogue comes from the API. It was a hardcoded map, which is a
+  // promise the form cannot keep: it offered versions this build may not
+  // support, and the rejection arrived only after submitting.
+  const [engines, setEngines] = useState<Engine[] | null>(null)
+  const [host, setHost] = useState<Host | null>(null)
+
+  const [engineKind, setEngineKind] = useState<string>('postgres')
   const [name, setName] = useState('')
-  const [version, setVersion] = useState(VERSIONS.postgres[0])
+  const [version, setVersion] = useState('')
   const [cpu, setCpu] = useState(1)
   const [memory, setMemory] = useState(2)
   const [storage, setStorage] = useState(20)
 
-  // Redis-specific
   const [maxMemory, setMaxMemory] = useState(1.5)
   const [policy, setPolicy] = useState<MaxMemoryPolicy>('allkeys-lru')
   const [aof, setAof] = useState(true)
 
-  const isRedis = engine === 'redis'
+  const [error, setError] = useState<unknown>(null)
+  const [busy, setBusy] = useState(false)
 
-  function selectEngine(e: DatabaseEngine) {
-    setEngine(e)
-    setVersion(VERSIONS[e][0])
-    if (e === 'redis') setStorage((s) => Math.min(s, 10))
+  useEffect(() => {
+    let cancelled = false
+
+    Promise.all([client.GET('/api/v1/database-engines'), client.GET('/api/v1/host')])
+      .then(([engineRes, hostRes]) => {
+        if (cancelled) return
+
+        const list = engineRes.data ?? []
+        setEngines(list)
+        setHost(hostRes.data ?? null)
+
+        const first = list.find((e) => e.kind === 'postgres') ?? list[0]
+        if (first) {
+          setEngineKind(first.kind)
+          setVersion(first.defaultVersion)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const engine = engines?.find((e) => e.kind === engineKind) ?? null
+  const isRedis = engineKind === 'redis'
+
+  function selectEngine(kind: string) {
+    setEngineKind(kind)
+    setVersion(engines?.find((e) => e.kind === kind)?.defaultVersion ?? '')
+    if (kind === 'redis') setStorage((s) => Math.min(s, 10))
   }
 
   const nameError = useMemo(() => {
@@ -58,38 +82,85 @@ export function DatabaseCreateForm() {
     return null
   }, [name])
 
-  const canSubmit = name.length > 1 && !nameError
+  const canSubmit = name.length > 1 && !nameError && !!engine && !!version && !busy
 
-  // Preview the effect on host memory allocation
-  const memPreview = hostHealth.memory.allocated + memory
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canSubmit) return
+
+    setBusy(true)
+    setError(null)
+
+    try {
+      const res = await client.POST('/api/v1/databases', {
+        body: {
+          slug: name,
+          displayName: name,
+          engine: engineKind,
+          version,
+          cpuNanos: coresToNanos(cpu),
+          memoryBytes: giBToBytes(memory),
+
+          // Sent for every engine, Redis included. Redis holds its data in
+          // memory but the append-only file is on disk and is on by default, so
+          // a zero allocation would be a zero-byte volume — harmless where
+          // storage is only accounted, and an immediate failure on a host that
+          // enforces quotas.
+          storageBytes: giBToBytes(storage),
+          ...(isRedis
+            ? {
+                maxMemoryBytes: giBToBytes(maxMemory),
+                maxMemoryPolicy: policy,
+                aofEnabled: aof,
+              }
+            : {}),
+        },
+      })
+
+      // 202 with a job, not a finished database. The next screen follows it.
+      if (res.data?.jobId) {
+        router.push(`/databases/new/provisioning?job=${res.data.jobId}`)
+        return
+      }
+
+      throw new Error('The API accepted the request without returning a job.')
+    } catch (err) {
+      setError(err)
+      setBusy(false)
+    }
+  }
+
+  if (!engines) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-transitional" />
+        Loading engines…
+      </div>
+    )
+  }
+
+  const policies = engine?.maxMemoryPolicies ?? []
 
   return (
-    <form
-      className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]"
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (!canSubmit) return
-        router.push(`/databases/new/provisioning?name=${encodeURIComponent(name)}&engine=${engine}`)
-      }}
-    >
+    <form className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]" onSubmit={submit}>
       <div className="flex flex-col gap-6">
         <Panel title="Engine">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {ENGINES.map((e) => (
+            {engines.map((e) => (
               <button
-                key={e}
+                key={e.kind}
                 type="button"
-                onClick={() => selectEngine(e)}
-                aria-pressed={engine === e}
+                onClick={() => selectEngine(e.kind)}
+                aria-pressed={engineKind === e.kind}
                 className={
                   'flex flex-col items-center gap-2 rounded-lg border p-3 text-sm transition-colors ' +
-                  (engine === e
+                  (engineKind === e.kind
                     ? 'border-ring bg-accent text-foreground'
                     : 'border-border bg-card text-muted-foreground hover:border-ring/50')
                 }
               >
-                <EngineGlyph engine={e} />
-                {engineLabel(e)}
+                <EngineGlyph engine={e.kind as DatabaseEngine} />
+                {e.displayName}
               </button>
             ))}
           </div>
@@ -108,9 +179,9 @@ export function DatabaseCreateForm() {
           </Field>
           <Field label="Version" htmlFor="db-version">
             <NativeSelect id="db-version" value={version} onChange={(e) => setVersion(e.target.value)}>
-              {VERSIONS[engine].map((v) => (
+              {(engine?.supportedVersions ?? []).map((v) => (
                 <option key={v} value={v}>
-                  {engineLabel(engine)} {v}
+                  {engine?.displayName} {v}
                 </option>
               ))}
             </NativeSelect>
@@ -124,14 +195,15 @@ export function DatabaseCreateForm() {
           <Field label={`Memory — ${memory} GiB`} htmlFor="db-mem">
             <Slider id="db-mem" min={0.5} max={32} step={0.5} value={memory} onChange={setMemory} />
           </Field>
-          {!isRedis && (
-            <Field label={`Storage — ${storage} GiB`} htmlFor="db-storage">
-              <Slider id="db-storage" min={5} max={500} step={5} value={storage} onChange={setStorage} />
-            </Field>
-          )}
+          <Field
+            label={`Storage — ${storage} GiB`}
+            htmlFor="db-storage"
+            hint={isRedis ? 'Redis keeps data in memory, but the append-only file is written here.' : undefined}
+          >
+            <Slider id="db-storage" min={isRedis ? 1 : 5} max={500} step={isRedis ? 1 : 5} value={storage} onChange={setStorage} />
+          </Field>
         </Panel>
 
-        {/* Engine-dependent section — Redis exposes memory semantics the others don't. */}
         {isRedis && (
           <Panel
             title="Redis configuration"
@@ -146,9 +218,9 @@ export function DatabaseCreateForm() {
             </Field>
             <Field label="Eviction policy" htmlFor="db-policy">
               <NativeSelect id="db-policy" value={policy} onChange={(e) => setPolicy(e.target.value as MaxMemoryPolicy)}>
-                {POLICIES.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
+                {policies.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
                   </option>
                 ))}
               </NativeSelect>
@@ -166,34 +238,37 @@ export function DatabaseCreateForm() {
             />
           </Panel>
         )}
+
+        {error != null && <ProblemBanner error={error} />}
       </div>
 
-      {/* Live impact sidebar */}
       <aside className="flex flex-col gap-4 xl:sticky xl:top-6 xl:self-start">
-        <Panel title="Host impact">
-          <p className="mb-3 flex items-start gap-2 text-xs text-muted-foreground">
-            <Info className="mt-0.5 size-3.5 shrink-0" />
-            The marker shows where host memory allocation lands after this database is created.
-          </p>
-          <AllocationRail
-            label="Host memory"
-            triple={hostHealth.memory}
-            requested={memPreview}
-          />
-        </Panel>
+        {host && (
+          <Panel title="Host impact">
+            <p className="mb-3 flex items-start gap-2 text-xs text-muted-foreground">
+              <Info className="mt-0.5 size-3.5 shrink-0" />
+              The marker shows where host memory allocation lands after this database is created.
+            </p>
+            <AllocationRail
+              label="Host memory"
+              triple={memoryRail(host.capacity, host.allocated, host.used)}
+              requested={memoryRail(host.capacity, host.allocated, host.used).allocated + memory}
+            />
+          </Panel>
+        )}
         <Panel title="Summary">
           <dl className="flex flex-col gap-2 font-mono text-xs">
-            <SummaryRow k="Engine" v={`${engineLabel(engine)} ${version}`} />
+            <SummaryRow k="Engine" v={`${engine?.displayName ?? engineKind} ${version}`} />
             <SummaryRow k="CPU" v={`${cpu} cores`} />
             <SummaryRow k="Memory" v={`${memory} GiB`} />
-            {!isRedis && <SummaryRow k="Storage" v={`${storage} GiB`} />}
+            <SummaryRow k="Storage" v={`${storage} GiB`} />
             {isRedis && <SummaryRow k="Max memory" v={`${maxMemory} GiB`} />}
             {isRedis && <SummaryRow k="Policy" v={policy} />}
             {isRedis && <SummaryRow k="AOF" v={aof ? 'enabled' : 'disabled'} />}
           </dl>
         </Panel>
         <Button type="submit" disabled={!canSubmit} className="w-full">
-          Create database
+          {busy ? 'Creating…' : 'Create database'}
         </Button>
       </aside>
     </form>

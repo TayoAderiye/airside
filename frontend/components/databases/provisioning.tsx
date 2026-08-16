@@ -1,63 +1,58 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { CheckCircle2 } from 'lucide-react'
+
+import { JobRun } from '@/components/job-run'
 import { Panel } from '@/components/ui/panel'
-import { JobProgress } from '@/components/job-progress'
-import { LogStream } from '@/components/logs/log-stream'
-import { EngineGlyph, engineLabel } from '@/components/engine'
 import { buttonVariants } from '@/components/ui/button'
-import type { DatabaseEngine, JobStep } from '@/lib/api/types'
 import { cn } from '@/lib/utils'
 
-const PROVISION_STEPS: JobStep[] = [
-  { id: 'reserve', label: 'Reserve host resources', state: 'running' },
-  { id: 'volume', label: 'Create data volume', state: 'pending' },
-  { id: 'pull', label: 'Pull engine image', state: 'pending' },
-  { id: 'start', label: 'Start container', state: 'pending' },
-  { id: 'init', label: 'Initialize data directory', state: 'pending' },
-  { id: 'ready', label: 'Wait for readiness probe', state: 'pending' },
-]
-
+/**
+ * Follows the provisioning job for a new database.
+ *
+ * What this replaced animated six fixed step labels on a timer and then linked
+ * to a hardcoded id, with no request to the API anywhere in it. It was
+ * convincing, and it was the reason a database could appear to provision and
+ * then not exist.
+ */
 export function Provisioning() {
-  const params = useSearchParams()
-  const name = params.get('name') ?? 'new-database'
-  const engine = (params.get('engine') as DatabaseEngine) ?? 'postgres'
-  const [done, setDone] = useState(false)
+  const jobId = useSearchParams().get('job')
+
+  if (!jobId) {
+    return (
+      <Panel title="No job">
+        <p className="text-sm text-muted-foreground">
+          This page follows a provisioning job and none was named. Start from the
+          database list.
+        </p>
+        <Link href="/databases" className={cn(buttonVariants({ variant: 'default' }), 'mt-3')}>
+          Databases
+        </Link>
+      </Panel>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-3">
-        <EngineGlyph engine={engine} className="size-10" />
-        <div>
-          <h1 className="font-display text-2xl font-semibold text-foreground">{name}</h1>
-          <p className="font-mono text-sm text-muted-foreground">
-            Provisioning {engineLabel(engine)} · this may take a moment
-          </p>
-        </div>
+      <div>
+        <h1 className="font-display text-2xl font-semibold text-foreground">Provisioning</h1>
+        <p className="font-mono text-sm text-muted-foreground">
+          Each step is the API&apos;s own. This may take a moment.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <Panel title="Steps">
-          <JobProgress steps={PROVISION_STEPS} stepMs={1600} onDone={() => setDone(true)} />
-          {done && (
-            <div className="mt-4 flex flex-col gap-3 rounded-md border border-running/40 bg-running/10 p-3">
-              <p className="flex items-center gap-2 text-sm font-medium text-running">
-                <CheckCircle2 className="size-4" />
-                {name} is running
-              </p>
-              <Link href={`/databases/db_pg_main`} className={cn(buttonVariants({ variant: 'default' }), 'w-full')}>
-                View database
-              </Link>
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Live log" bodyClassName="p-0">
-          <LogStream source={name} height="24rem" />
-        </Panel>
+      <div className="max-w-2xl">
+        <JobRun
+          jobId={jobId}
+          destination={(final) =>
+            // The workload id comes from the finished job. Nothing else on this
+            // page knows it, and nothing should guess it.
+            final.workloadId
+              ? { href: `/databases/${final.workloadId}`, label: 'View database' }
+              : { href: '/databases', label: 'Back to databases' }
+          }
+        />
       </div>
     </div>
   )
