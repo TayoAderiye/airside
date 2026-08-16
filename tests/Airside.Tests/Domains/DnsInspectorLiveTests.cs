@@ -14,6 +14,7 @@ namespace Airside.Tests.Domains;
 /// confirm that the mock was written to match the code.
 /// </remarks>
 [Collection("network")]
+[Trait("Category", "Integration")]
 public class DnsInspectorLiveTests
 {
     private static DnsInspector Build() =>

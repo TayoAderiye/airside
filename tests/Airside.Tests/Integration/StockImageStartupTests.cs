@@ -22,6 +22,7 @@ namespace Airside.Tests.Integration;
 /// </para>
 /// </remarks>
 [Collection("docker")]
+[Trait("Category", "Integration")]
 public sealed class StockImageStartupTests
 {
     /// <summary>nginx: de-escalates to uid 101 and binds port 80.</summary>
@@ -84,6 +85,15 @@ public sealed class StockImageStartupTests
     {
         using var runtime = (IDisposable)DockerProbe.CreateRuntime();
         var containers = ((IContainerRuntime)runtime).Containers;
+
+        // As above: the image has to be present before a container can be made
+        // from it, and a clean runner has nothing cached.
+        var images = ((IContainerRuntime)runtime).Images;
+
+        if (await images.FindAsync(image, CancellationToken.None) is null)
+        {
+            await images.PullAsync(image, null, null, CancellationToken.None);
+        }
 
         var existing = await containers.FindAsync(name, CancellationToken.None);
 

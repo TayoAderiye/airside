@@ -24,6 +24,7 @@ namespace Airside.Tests.Integration;
 /// </para>
 /// </remarks>
 [Collection("docker")]
+[Trait("Category", "Integration")]
 public sealed class NetworkIsolationTests(IsolationFixture fixture) : IClassFixture<IsolationFixture>
 {
     [DockerFact]
@@ -221,6 +222,16 @@ public sealed class IsolationFixture : IAsyncLifetime
             [AirsideLabels.Slug] = slug,
         };
 
+    private async Task EnsureImageAsync(ImageReference image, CancellationToken ct)
+    {
+        if (await Runtime.Images.FindAsync(image, ct) is not null)
+        {
+            return;
+        }
+
+        await Runtime.Images.PullAsync(image, null, null, ct);
+    }
+
     private async Task CreateNetworkAsync(string name, CancellationToken ct)
     {
         await Runtime.Networks.CreateAsync(
@@ -235,6 +246,11 @@ public sealed class IsolationFixture : IAsyncLifetime
 
     private async Task<string> StartAsync(ContainerSpec spec, CancellationToken ct)
     {
+        // Pulled rather than assumed present. Creating a container from an image
+        // that is not cached fails with "No such image", and a developer machine
+        // that happens to have it is the one place this never shows up.
+        await EnsureImageAsync(spec.Image, ct);
+
         var existing = await Runtime.Containers.FindAsync(spec.Name, ct);
 
         if (existing is not null)
