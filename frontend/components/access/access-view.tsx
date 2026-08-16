@@ -1,182 +1,223 @@
 'use client'
 
-import { useState } from 'react'
-import { Shield, UserPlus } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Loader2, Shield } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
 import { PageHeader, Panel } from '@/components/ui/panel'
-import { accessUsers, permissions, rolePermissions } from '@/lib/api/mock'
-import type { AccessUser, RoleName } from '@/lib/api/types'
+import { ProblemBanner } from '@/components/problem-banner'
+import { client } from '@/lib/api/client'
+import type { components } from '@/lib/api/schema'
 import { formatRelative } from '@/lib/status'
 import { cn } from '@/lib/utils'
 
-const ROLES: RoleName[] = [
-  'Super Admin',
-  'Infrastructure Admin',
-  'Database Admin',
-  'Application Admin',
-  'Developer',
-  'Read Only',
-]
+type User = components['schemas']['UserDto']
+type Role = components['schemas']['RoleDto']
+type Permission = components['schemas']['PermissionDto']
 
-const GROUPS = ['Infrastructure', 'Databases', 'Applications', 'Data & Query', 'Secrets', 'Access'] as const
-
-const STATUS: Record<AccessUser['status'], { label: string; className: string }> = {
-  active: { label: 'Active', className: 'text-running' },
-  invited: { label: 'Invited', className: 'text-degraded' },
-  disabled: { label: 'Disabled', className: 'text-muted-foreground' },
+/**
+ * The group a permission belongs to, taken from its code.
+ *
+ * PermissionDto has no group — the codes are `database.read`, `application.deploy`
+ * and so on, so the prefix is the grouping and deriving it cannot drift from the
+ * API the way a hand-written table does. What this replaced kept six group names
+ * and a fixed list of permissions, neither of which the API had ever confirmed.
+ */
+function groupOf(code: string) {
+  const dot = code.indexOf('.')
+  return dot < 0 ? code : code.slice(0, dot)
 }
 
 export function AccessView() {
-  const [selectedRole, setSelectedRole] = useState<RoleName>('Infrastructure Admin')
-  const granted = new Set(rolePermissions[selectedRole])
+  const [users, setUsers] = useState<User[] | null>(null)
+  const [roles, setRoles] = useState<Role[]>([])
+  const [permissions, setPermissions] = useState<Permission[]>([])
+  const [selected, setSelected] = useState<string | null>(null)
+  const [error, setError] = useState<unknown>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    Promise.all([
+      client.GET('/api/v1/users'),
+      client.GET('/api/v1/roles'),
+      client.GET('/api/v1/permissions'),
+    ])
+      .then(([userRes, roleRes, permRes]) => {
+        if (cancelled) return
+
+        const roleList = roleRes.data ?? []
+        setUsers(userRes.data?.items ?? [])
+        setRoles(roleList)
+
+        // Obsolete permissions still exist so old audit entries resolve, but
+        // showing them in an editor would invite granting something retired.
+        setPermissions((permRes.data ?? []).filter((p) => !p.isObsolete))
+        setSelected((prev) => prev ?? roleList[0]?.slug ?? null)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err)
+        setUsers([])
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const role = roles.find((r) => r.slug === selected) ?? null
+  const granted = useMemo(() => new Set(role?.permissions ?? []), [role])
+
+  const groups = useMemo(() => {
+    const byGroup = new Map<string, Permission[]>()
+
+    for (const p of permissions) {
+      const key = groupOf(p.code)
+      const list = byGroup.get(key) ?? []
+      list.push(p)
+      byGroup.set(key, list)
+    }
+
+    return [...byGroup.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [permissions])
+
+  if (users === null) {
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin text-transitional" />
+        Loading users and roles…
+      </p>
+    )
+  }
 
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Users & Access"
         description="Roles are bundles over granular permissions. Restarting a database and reading its contents are different grants."
-        actions={
-          <Button variant="default">
-            <UserPlus className="size-4" /> Invite
-          </Button>
-        }
       />
 
+      {error != null && <ProblemBanner error={error} />}
+
       <Panel bodyClassName="p-0" className="mb-6">
-        <ul className="divide-y divide-border">
-          {accessUsers.map((u) => {
-            const s = STATUS[u.status]
-            return (
+        {users.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">No users.</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {users.map((u) => (
               <li key={u.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                   <span className="grid size-8 place-items-center rounded-full bg-primary/15 font-mono text-xs font-semibold text-primary">
-                    {initials(u.name)}
+                    {initials(u.displayName || u.email)}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{u.name}</p>
+                    <p className="truncate text-sm font-medium text-foreground">{u.displayName || u.email}</p>
                     <p className="truncate font-mono text-xs text-muted-foreground">{u.email}</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRole(u.role)}
-                  className="w-fit rounded bg-secondary px-2 py-0.5 font-mono text-xs text-foreground hover:bg-secondary/80"
+
+                {/* Roles, plural. A user can hold several, and rendering only
+                    the first would hide a grant somebody made deliberately. */}
+                <div className="flex flex-wrap gap-1">
+                  {u.roles.length === 0 ? (
+                    <span className="font-mono text-xs text-muted-foreground">no role</span>
+                  ) : (
+                    u.roles.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => setSelected(r)}
+                        className="w-fit rounded bg-secondary px-2 py-0.5 font-mono text-xs text-foreground hover:bg-secondary/80"
+                      >
+                        {r}
+                      </button>
+                    ))
+                  )}
+                </div>
+
+                <span
+                  className={cn('text-xs font-medium', u.isActive ? 'text-running' : 'text-muted-foreground')}
                 >
-                  {u.role}
-                </button>
-                <span className={cn('text-xs font-medium', s.className)}>{s.label}</span>
+                  {u.isActive ? 'Active' : 'Disabled'}
+                </span>
                 <span className="font-mono text-xs text-muted-foreground sm:w-24 sm:text-right">
-                  {u.lastActive ? formatRelative(u.lastActive) : 'never'}
+                  {u.lastLoginAt ? formatRelative(u.lastLoginAt) : 'never'}
                 </span>
               </li>
-            )
-          })}
-        </ul>
+            ))}
+          </ul>
+        )}
       </Panel>
 
       <Panel
         title={
           <span className="flex items-center gap-2">
             <Shield className="size-4 text-muted-foreground" />
-            Permission editor
+            Permissions by role
           </span>
         }
-        description="Infrastructure permissions move containers. Data & Query permissions read or write what is inside them. A role can have one without the other."
+        description="Infrastructure permissions move containers. Query permissions read or write what is inside them. A role can have one without the other."
       >
         <div className="mb-4 flex flex-wrap gap-1.5">
-          {ROLES.map((role) => (
+          {roles.map((r) => (
             <button
-              key={role}
+              key={r.slug}
               type="button"
-              onClick={() => setSelectedRole(role)}
-              aria-pressed={selectedRole === role}
+              onClick={() => setSelected(r.slug)}
+              aria-pressed={selected === r.slug}
               className={cn(
                 'rounded-md border px-2.5 py-1 text-xs transition-colors',
-                selectedRole === role
+                selected === r.slug
                   ? 'border-primary bg-primary/10 text-foreground'
                   : 'border-border text-muted-foreground hover:text-foreground',
               )}
             >
-              {role}
+              {r.name}
             </button>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <PermissionColumn
-            title="Infrastructure"
-            note="Lifecycle: start, stop, resize, deploy. Does not grant access to data."
-            groups={['Infrastructure', 'Databases', 'Applications']}
-            granted={granted}
-          />
-          <PermissionColumn
-            title="Data & query"
-            note="Read or write the contents of a database. Separate from being able to restart it."
-            groups={['Data & Query', 'Secrets', 'Access']}
-            granted={granted}
-            isolate
-          />
-        </div>
-      </Panel>
-    </div>
-  )
-}
+        {role?.description && <p className="mb-3 text-sm text-muted-foreground">{role.description}</p>}
 
-function PermissionColumn({
-  title,
-  note,
-  groups,
-  granted,
-  isolate,
-}: {
-  title: string
-  note: string
-  groups: readonly (typeof GROUPS)[number][]
-  granted: Set<string>
-  isolate?: boolean
-}) {
-  return (
-    <div className={cn('rounded-lg border p-3', isolate ? 'border-degraded/30 bg-degraded-soft/20' : 'border-border')}>
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>
-      <div className="mt-3 flex flex-col gap-3">
-        {groups.map((group) => {
-          const defs = permissions.filter((p) => p.group === group)
-          return (
-            <div key={group}>
-              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{group}</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {groups.map(([name, defs]) => (
+            <div key={name} className="rounded-lg border border-border p-3">
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{name}</p>
               <ul className="flex flex-col gap-1.5">
                 {defs.map((p) => {
-                  const on = granted.has(p.key)
+                  const on = granted.has(p.code)
                   return (
-                    <li key={p.key} className="flex items-center gap-2">
+                    <li key={p.code} className="flex items-start gap-2">
                       <span
                         className={cn(
-                          'grid size-4 place-items-center rounded-sm border font-mono text-[10px]',
+                          'mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border font-mono text-[10px]',
                           on ? 'border-running/50 bg-running-soft text-running' : 'border-border text-muted-foreground',
                         )}
                         aria-hidden
                       >
                         {on ? '✓' : ''}
                       </span>
-                      <span className={cn('text-sm', on ? 'text-foreground' : 'text-muted-foreground')}>{p.label}</span>
+                      <span className={cn('min-w-0 text-sm', on ? 'text-foreground' : 'text-muted-foreground')}>
+                        <span className="font-mono text-xs">{p.code}</span>
+                        {p.description && <span className="block text-xs text-muted-foreground">{p.description}</span>}
+                      </span>
                     </li>
                   )
                 })}
               </ul>
             </div>
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      </Panel>
     </div>
   )
 }
 
 function initials(name: string) {
   return name
-    .split(' ')
+    .split(/[\s@.]+/)
     .map((p) => p[0])
+    .filter(Boolean)
     .slice(0, 2)
     .join('')
     .toUpperCase()
