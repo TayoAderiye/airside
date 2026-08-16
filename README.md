@@ -94,7 +94,10 @@ This is the step that makes the tunnel unnecessary, and it is worth doing
 immediately.
 
 Point an `A` record at the host, then in **Settings → dashboard domain** type the
-hostname to confirm it. Airside runs pre-flight checks *before* switching — that
+hostname to confirm it. On AWS, allocate an **Elastic IP** first and point the
+record at that — an instance's default public address is released on stop/start,
+which breaks the record and the certificate renewal with it.
+[Route 53, step by step](docs/domains-and-tls.md#pointing-a-route-53-domain-at-airside). Airside runs pre-flight checks *before* switching — that
 the name resolves to this host, and that CAA records permit issuance — and
 refuses with the specific reason rather than letting the certificate request fail
 silently afterwards.

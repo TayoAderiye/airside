@@ -130,6 +130,63 @@ Two more AWS specifics: a certificate used with CloudFront must live in
 `us-east-1` regardless of where the instance is, and **without an Elastic IP a
 stop/start changes the public address** and breaks every A record pointing at it.
 
+### Pointing a Route 53 domain at Airside
+
+The common case: an EC2 instance running Airside, a domain in Route 53, and no
+load balancer. This is a plain `A` record, not an alias — alias targets are AWS
+resources like an ALB or CloudFront distribution, and an instance's IP is neither.
+
+**1. Allocate an Elastic IP first.** EC2 → Elastic IPs → Allocate, then Associate
+it with the instance. Do this before creating the record, not after. A public IP
+that came with the instance is released on stop/start, and the first you hear of
+it is a dashboard that has stopped resolving and a certificate that cannot renew.
+
+**2. Check the hosted zone is authoritative.** Route 53 → Hosted zones → your
+domain, and look at the `NS` record. Those four nameservers must match what the
+registrar has for the domain. If the domain was registered outside AWS and its
+nameservers were never repointed, the zone is real, the record you are about to
+create is real, and the internet will ignore both.
+
+**3. Create the record.** In the hosted zone, *Create record*:
+
+| Field | Value |
+|---|---|
+| Record name | `airside` — giving `airside.example.com`. Leave blank for the apex. |
+| Record type | **A** |
+| Alias | **Off** |
+| Value | the Elastic IP |
+| TTL | **60** while you are setting this up |
+| Routing policy | Simple |
+
+A low TTL matters here. If you get the address wrong, a 300-second TTL means five
+minutes of a wrong answer cached across the internet — including at Let's
+Encrypt, which will have recorded a failure against your rate limit. Raise it once
+it works.
+
+**4. Verify before touching Airside.** From anywhere:
+
+```bash
+dig +short airside.example.com
+```
+
+That must return your Elastic IP and nothing else. If it returns nothing, either
+propagation has not finished or step 2 is the problem.
+
+**5. Set it in Airside**, in Settings → dashboard domain. Pre-flight runs before
+anything changes and will tell you specifically what is wrong — `found
+203.0.113.9, expected 198.51.100.4` if the record points elsewhere, or a CAA
+failure if a `CAA` record in the zone permits some other authority and not Let's
+Encrypt. Route 53 zones have no CAA record by default, which permits everyone; if
+somebody added one, it needs `letsencrypt.org` in it.
+
+**6. Security group.** Port 80 must be open to `0.0.0.0/0`, not just 443. The
+HTTP-01 challenge is served over port 80 even for a site that will only ever
+answer on HTTPS, and closing it is the most common reason issuance fails on AWS.
+
+Applications get their own records the same way — one `A` record each, pointing
+at the same Elastic IP. Caddy separates them by hostname, so a single address
+serves every domain on the host.
+
 ## Other providers
 
 - **Azure** — App Service Managed Certificates cannot be exported. Key Vault
