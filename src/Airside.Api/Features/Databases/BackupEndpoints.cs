@@ -48,11 +48,25 @@ internal static class BackupEndpoints
         return app;
     }
 
-    private static async Task<Ok<IReadOnlyList<BackupDto>>> ListAsync(
+    private static async Task<Results<Ok<IReadOnlyList<BackupDto>>, NotFound>> ListAsync(
         Guid id,
         AirsideDbContext db,
         CancellationToken ct)
     {
+        // Answered before the query rather than after. An unknown id used to
+        // return an empty list, which reads as "this database has no backups"
+        // rather than "there is no such database" — and the two deserve
+        // different answers on a screen that offers to restore from one.
+        var exists = await db.Databases
+            .AsNoTracking()
+            .AnyAsync(d => d.Id == id, ct)
+            .ConfigureAwait(false);
+
+        if (!exists)
+        {
+            return TypedResults.NotFound();
+        }
+
         var backups = await db.Backups
             .AsNoTracking()
             .Where(b => b.DatabaseInstanceId == id)

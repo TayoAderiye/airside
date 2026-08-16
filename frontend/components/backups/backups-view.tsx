@@ -35,15 +35,27 @@ export function BackupsView() {
   const load = useCallback(async () => {
     try {
       const dbRes = await client.GET('/api/v1/databases')
-      const list = dbRes.data?.items ?? []
+
+      // Airside's own store is excluded. Its id is synthesised and belongs to
+      // no row, so asking for its backups cannot succeed — and the control
+      // plane is backed up by the button at the top of this page, which
+      // archives the store and the key ring together.
+      const list = (dbRes.data?.items ?? []).filter((d) => !d.isSystem)
       setDatabases(list)
 
       const pairs = await Promise.all(
         list.map(async (d) => {
-          const res = await client.GET('/api/v1/databases/{id}/backups', { params: { path: { id: d.id } } })
+          try {
+            const res = await client.GET('/api/v1/databases/{id}/backups', { params: { path: { id: d.id } } })
 
-          // A plain array, unlike deployments and audit which are cursor-paged.
-          return [d.id, res.data ?? []] as const
+            // A plain array, unlike deployments and audit which are cursor-paged.
+            return [d.id, res.data ?? []] as const
+          } catch {
+            // One database failing must not empty the page. Before this, a
+            // single bad response left "No databases to back up" on a host
+            // that had several.
+            return [d.id, []] as const
+          }
         }),
       )
 
